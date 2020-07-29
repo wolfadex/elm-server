@@ -65,6 +65,7 @@ type Status
     | LoopDetected
     | NotExtended
     | NetworkAuthenticationRequired
+    | Unofficial Int
 
 
 toCode : Status -> Int
@@ -259,198 +260,201 @@ toCode status =
         NetworkAuthenticationRequired ->
             511
 
+        Unofficial code ->
+            code
 
-fromCode : Int -> Maybe Status
+
+fromCode : Int -> Status
 fromCode code =
     case code of
         100 ->
-            Just Continue
+            Continue
 
         101 ->
-            Just SwitchingProtocols
+            SwitchingProtocols
 
         102 ->
-            Just Processing
+            Processing
 
         103 ->
-            Just EarlyHints
+            EarlyHints
 
         200 ->
-            Just Ok
+            Ok
 
         201 ->
-            Just Created
+            Created
 
         202 ->
-            Just Accepted
+            Accepted
 
         203 ->
-            Just NonAuthoritativeInformation
+            NonAuthoritativeInformation
 
         204 ->
-            Just NoContent
+            NoContent
 
         205 ->
-            Just ResetContent
+            ResetContent
 
         206 ->
-            Just PartialContent
+            PartialContent
 
         207 ->
-            Just MultiStatus
+            MultiStatus
 
         208 ->
-            Just AlreadyReported
+            AlreadyReported
 
         226 ->
-            Just IMUsed
+            IMUsed
 
         300 ->
-            Just MultipleChoices
+            MultipleChoices
 
         301 ->
-            Just MovedPermanently
+            MovedPermanently
 
         302 ->
-            Just Found
+            Found
 
         303 ->
-            Just SeeOther
+            SeeOther
 
         304 ->
-            Just NotModified
+            NotModified
 
         305 ->
-            Just UseProxy
+            UseProxy
 
         306 ->
-            Just SwitchProxy
+            SwitchProxy
 
         307 ->
-            Just TemporaryRedirect
+            TemporaryRedirect
 
         308 ->
-            Just PermanentRedirect
+            PermanentRedirect
 
         400 ->
-            Just BadRequest
+            BadRequest
 
         401 ->
-            Just Unauthorized
+            Unauthorized
 
         402 ->
-            Just PaymentRequired
+            PaymentRequired
 
         403 ->
-            Just Forbidden
+            Forbidden
 
         404 ->
-            Just NotFound
+            NotFound
 
         405 ->
-            Just MethodNotAllowed
+            MethodNotAllowed
 
         406 ->
-            Just NotAcceptable
+            NotAcceptable
 
         407 ->
-            Just ProxyAuthenticationRequired
+            ProxyAuthenticationRequired
 
         408 ->
-            Just RequestTimeout
+            RequestTimeout
 
         409 ->
-            Just Conflict
+            Conflict
 
         410 ->
-            Just Gone
+            Gone
 
         411 ->
-            Just LengthRequired
+            LengthRequired
 
         412 ->
-            Just PreconditionFailed
+            PreconditionFailed
 
         413 ->
-            Just PayloadTooLarge
+            PayloadTooLarge
 
         414 ->
-            Just URITooLong
+            URITooLong
 
         415 ->
-            Just UnsupportedMediaType
+            UnsupportedMediaType
 
         416 ->
-            Just RangeNotSatisfiable
+            RangeNotSatisfiable
 
         417 ->
-            Just ExpectationFailed
+            ExpectationFailed
 
         418 ->
-            Just ImATeapot
+            ImATeapot
 
         421 ->
-            Just MisdirectedRequest
+            MisdirectedRequest
 
         422 ->
-            Just UnprocessableEntity
+            UnprocessableEntity
 
         423 ->
-            Just Locked
+            Locked
 
         424 ->
-            Just FailedDependency
+            FailedDependency
 
         425 ->
-            Just TooEarly
+            TooEarly
 
         426 ->
-            Just UpgradeRequired
+            UpgradeRequired
 
         428 ->
-            Just PreconditionRequired
+            PreconditionRequired
 
         429 ->
-            Just TooManyRequests
+            TooManyRequests
 
         431 ->
-            Just RequestHeaderFieldsTooLarge
+            RequestHeaderFieldsTooLarge
 
         451 ->
-            Just UnavailableForLegalReasons
+            UnavailableForLegalReasons
 
         500 ->
-            Just InternalServerError
+            InternalServerError
 
         501 ->
-            Just NotImplemented
+            NotImplemented
 
         502 ->
-            Just BadGateway
+            BadGateway
 
         503 ->
-            Just ServiceUnavailable
+            ServiceUnavailable
 
         504 ->
-            Just GatewayTimeout
+            GatewayTimeout
 
         505 ->
-            Just HTTPVersionNotSupported
+            HTTPVersionNotSupported
 
         506 ->
-            Just VariantAlsoNegotiates
+            VariantAlsoNegotiates
 
         507 ->
-            Just InsufficientStorage
+            InsufficientStorage
 
         508 ->
-            Just LoopDetected
+            LoopDetected
 
         510 ->
-            Just NotExtended
+            NotExtended
 
         511 ->
-            Just NetworkAuthenticationRequired
+            NetworkAuthenticationRequired
 
-        _ ->
-            Nothing
+        unofficialCode ->
+            Unofficial unofficialCode

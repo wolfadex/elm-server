@@ -141,11 +141,10 @@ function runCompiledJs(jsFileName, commandLineArgs) {
   const elmServer = module.init({ flags: flags });
 
   function respond(response) {
-    elmServer.ports.respond.send(response);
+    elmServer.ports.respondPort.send(response);
   }
 
   elmServer.ports.command.subscribe(async function (command) {
-    console.log(command.msg);
     switch (command.msg) {
       case "SERVE":
         {

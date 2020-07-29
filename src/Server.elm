@@ -7,18 +7,21 @@ port module Server exposing
     , baseConfig
     , envAtPath
     , getPath
+    , makeSecure
     , matchPath
     , program
+    , respond
     , withPort
     )
 
-import Internal.Database exposing (DatabaseConnection)
-import Internal.Response
-import Internal.Server exposing (Certs, CommandCmd, Config(..), Server(..), Type(..))
+import ContentType
+import Internal.Response exposing (Response(..))
+import Internal.Server exposing (Certs, CommandCmd, Config(..), Context, Server(..), Type(..))
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
 import Platform
 import Result.Extra
+import Status exposing (Status)
 
 
 type alias Program =
@@ -75,7 +78,7 @@ type Msg
 port command : CommandCmd -> Cmd msg
 
 
-port respond : (CommandCmd -> msg) -> Sub msg
+port respondPort : (CommandCmd -> msg) -> Sub msg
 
 
 program : { init : Flags -> Config, handler : Context -> Context } -> Program
@@ -153,7 +156,7 @@ decodeEnv key valDecoder =
 
 subscriptions : Server -> Sub Msg
 subscriptions _ =
-    respond Incoming
+    respondPort Incoming
 
 
 update : (Context -> Context) -> Msg -> Server -> ( Server, Cmd Msg )
@@ -179,6 +182,7 @@ update handler msg model =
                             }
                                 |> Internal.Server.Context
                                 |> handler
+                                |> sendResponse
                     in
                     ( response.server
                     , response.commands
@@ -203,7 +207,9 @@ update handler msg model =
                                 Just continuation ->
                                     let
                                         (Internal.Server.Context response) =
-                                            continuation result
+                                            result
+                                                |> continuation
+                                                |> sendResponse
                                     in
                                     ( response.server
                                     , response.commands
@@ -252,3 +258,65 @@ matchPath (Internal.Server.Context { request }) =
     Json.Decode.decodeValue (Json.Decode.field "url" Json.Decode.string) request
         |> Result.mapError Json.Decode.errorToString
         |> Result.map (String.split "/" >> List.filter (not << String.isEmpty))
+
+
+respond : { status : Status, body : String } -> Context -> Context
+respond { status, body } (Internal.Server.Context context) =
+    Internal.Server.Context
+        { context
+            | response =
+                context.response
+                    |> Internal.Response.map (\res -> { res | status = status, body = body })
+                    |> (\response ->
+                            case response of
+                                Sent ->
+                                    response
+
+                                ReadyToSend _ ->
+                                    response
+
+                                Building r ->
+                                    ReadyToSend r
+                       )
+        }
+
+
+sendResponse : Context -> Context
+sendResponse (Internal.Server.Context context) =
+    case context.response of
+        Sent ->
+            Internal.Server.Context context
+
+        Building _ ->
+            Internal.Server.Context context
+
+        ReadyToSend response ->
+            Internal.Server.Context
+                { context
+                    | commands =
+                        { msg = "RESPOND"
+                        , args =
+                            Json.Encode.object
+                                [ ( "options"
+                                  , Json.Encode.object
+                                        [ ( "status"
+                                          , response.status
+                                                |> Status.toCode
+                                                |> Json.Encode.int
+                                          )
+                                        , ( "body"
+                                          , Json.Encode.string response.body
+                                          )
+                                        , ( "contentType"
+                                          , response.contentType
+                                                |> ContentType.toString
+                                                |> Json.Encode.string
+                                          )
+                                        ]
+                                  )
+                                , ( "req", context.request )
+                                ]
+                        }
+                            :: context.commands
+                    , response = Sent
+                }

@@ -6,6 +6,7 @@ import Status exposing (Status(..))
 
 type Response
     = Building ResponseData
+    | ReadyToSend ResponseData
     | Sent
 
 
@@ -26,6 +27,9 @@ map fn response =
     case response of
         Sent ->
             response
+
+        ReadyToSend res ->
+            ReadyToSend (fn res)
 
         Building res ->
             Building (fn res)

@@ -36,22 +36,24 @@ handler context =
     case Server.matchPath context of
         Result.Ok [] ->
             context
-                |> Response.setBody indexPage
-                |> Response.send
+                |> Server.respond
+                    { status = Status.Ok
+                    , body = indexPage
+                    }
                 |> Log.toConsole "index page requested"
 
         Result.Ok [ "hello", name ] ->
             context
-                |> Response.setBody ("Hello, " ++ name ++ "!")
-                |> Response.send
+                |> Server.respond { body = "Hello, " ++ name ++ "!", status = Status.Ok }
 
         Result.Ok [ "person", name, ageStr ] ->
             case String.toInt ageStr of
                 Nothing ->
                     context
-                        |> Response.setStatus NotAcceptable
-                        |> Response.setBody "Age should be an Int"
-                        |> Response.send
+                        |> Server.respond
+                            { status = NotAcceptable
+                            , body = "Age should be an Int"
+                            }
 
                 Just age ->
                     context
@@ -63,32 +65,28 @@ handler context =
                                 case result of
                                     Result.Ok person ->
                                         continueContext
-                                            |> Response.setStatus Status.Ok
-                                            |> Response.setBody
-                                                ([ ( "name", Json.Encode.string name )
-                                                 , ( "age", Json.Encode.int age )
-                                                 ]
-                                                    |> Json.Encode.object
-                                                    |> Json.Encode.encode 0
-                                                )
-                                            |> Response.send
+                                            |> Server.respond
+                                                { status = Status.Ok
+                                                , body =
+                                                    [ ( "name", Json.Encode.string name )
+                                                    , ( "age", Json.Encode.int age )
+                                                    ]
+                                                        |> Json.Encode.object
+                                                        |> Json.Encode.encode 0
+                                                }
 
                                     Err err ->
                                         continueContext
-                                            |> Response.setStatus InternalServerError
-                                            |> Response.setBody ("Couldn't create person: " ++ err)
-                                            |> Response.send
+                                            |> Response.error ("Couldn't create person: " ++ err)
                             )
 
         Result.Ok _ ->
             context
                 |> Response.notFound
-                |> Response.send
 
         Err err ->
             context
                 |> Response.error err
-                |> Response.send
 
 
 indexPage : String
