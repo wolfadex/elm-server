@@ -1,64 +1,80 @@
-module Response exposing (error, methodNotAllowed, notFound, setBody, setContentType, setStatus)
+module Response exposing
+    ( Header
+    , Response
+    , default
+    , error
+    , header
+    , json
+    , methodNotAllowed
+    , notFound
+    , setBody
+    , setContentType
+    , setStatus
+    )
 
 import ContentType exposing (ContentType(..))
-import Internal.Response exposing (Response(..))
+import Http exposing (Response)
+import Internal.Response exposing (Header, InternalResponse(..))
 import Internal.Server exposing (Context(..))
-import Server
+import Json.Encode exposing (Value)
 import Status exposing (Status(..))
 
 
-setStatus : Status -> Context -> Context
-setStatus status (Context context) =
-    Context
-        { context
-            | response =
-                Internal.Response.map
-                    (\res -> { res | status = status })
-                    context.response
-        }
+setStatus : Status -> Response -> Response
+setStatus status =
+    Internal.Response.map (\r -> { r | status = status })
 
 
-setBody : String -> Context -> Context
-setBody body (Context context) =
-    Context
-        { context
-            | response =
-                Internal.Response.map
-                    (\res -> { res | body = body })
-                    context.response
-        }
+setBody : String -> Response -> Response
+setBody body =
+    Internal.Response.map (\r -> { r | body = body })
 
 
-setContentType : ContentType -> Context -> Context
-setContentType contentType (Context context) =
-    Context
-        { context
-            | response =
-                Internal.Response.map
-                    (\res -> { res | contentType = contentType })
-                    context.response
-        }
+setContentType : ContentType -> Response -> Response
+setContentType contentType =
+    Internal.Response.map (\r -> { r | contentType = contentType })
 
 
-notFound : Context -> Context
+type alias Response =
+    InternalResponse
+
+
+type Header
+    = Header Internal.Response.Header
+
+
+default : Response
+default =
+    Internal.Response.base
+
+
+header : String -> String -> Header
+header key value =
+    Header { key = key, value = value }
+
+
+json : Value -> Response
+json body =
+    Internal.Response.base
+        |> Internal.Response.map
+            (\r ->
+                { r | status = InternalServerError, body = Json.Encode.encode 0 body }
+            )
+
+
+notFound : Response
 notFound =
-    Server.respond
-        { body = "Not Found"
-        , status = NotFound
-        }
+    Internal.Response.base
+        |> Internal.Response.map (\r -> { r | status = NotFound, body = "Not Found" })
 
 
-error : String -> Context -> Context
+error : String -> Response
 error body =
-    Server.respond
-        { body = body
-        , status = InternalServerError
-        }
+    Internal.Response.base
+        |> Internal.Response.map (\r -> { r | status = InternalServerError, body = body })
 
 
-methodNotAllowed : Context -> Context
+methodNotAllowed : Response
 methodNotAllowed =
-    Server.respond
-        { body = "Method Not Allowed"
-        , status = MethodNotAllowed
-        }
+    Internal.Response.base
+        |> Internal.Response.map (\r -> { r | status = MethodNotAllowed, body = "Method Not Allowed" })

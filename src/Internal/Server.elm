@@ -1,34 +1,26 @@
 module Internal.Server exposing
     ( Certs
-    , Command
-    , CommandCmd
     , Config(..)
     , ConfigData
     , Context(..)
-    , Continuation
     , Request
-    , RunningServer
+    , RunnerResponse
     , Server(..)
     , Type(..)
-    , getContinuation
-    , initContinuations
-    , insertContinuation
+    , runTask
     )
 
-import Dict exposing (Dict)
+import Http
 import Internal.Database exposing (DatabaseConnection)
-import Internal.Response exposing (Response(..))
+import Json.Decode
 import Json.Encode exposing (Value)
 import Status exposing (Status(..))
+import Task exposing (Task)
 
 
-type alias Command =
-    ( Server, CommandCmd )
-
-
-type alias CommandCmd =
-    { msg : String
-    , args : Value
+type alias RunnerResponse =
+    { message : String
+    , body : Value
     }
 
 
@@ -43,8 +35,7 @@ type Context
 type alias ContextData =
     { request : Request
     , server : Server
-    , commands : List CommandCmd
-    , response : Response
+    , requestId : String
     }
 
 
@@ -69,56 +60,45 @@ type alias Certs =
     ()
 
 
-
--- { msg = "RESPOND"
--- , args =
---     Json.Encode.object
---         [ ( "options"
---             , Json.Encode.object
---                 [ ( "status", Json.Encode.int 404 )
---                 , ( "body", Json.Encode.string "Not Found" )
---                 ]
---             )
---         , ( "req", context.request )
---         ]
--- }
-
-
 type Server
     = NotYetStarted
-    | Running RunningServer
+    | Running
 
 
-type alias RunningServer =
-    { actual : Value
-    , nextContinuation : Int
-    , continuations : Dict Int Continuation
-    }
+runTask : String -> Value -> Task String RunnerResponse
+runTask name value =
+    Http.task
+        { method = "POST"
+        , headers = []
+        , url = "/runner"
+        , body =
+            [ ( "msg", Json.Encode.string name )
+            , ( "args", value )
+            ]
+                |> Json.Encode.object
+                |> Http.jsonBody
+        , timeout = Nothing
+        , resolver =
+            (\response ->
+                case response of
+                    Http.BadUrl_ url ->
+                        "Javscript Error: Bad Url: "
+                            ++ url
+                            |> Err
 
+                    Http.Timeout_ ->
+                        Err "Javascript took too long to respond"
 
-type alias Continuation =
-    Result String Value -> Context
+                    Http.NetworkError_ ->
+                        Err "Unknown javascript error resulted in a 'Network Error'"
 
+                    Http.BadStatus_ _ body ->
+                        Err body
 
-{-| The `actual` value is whatever is passed back from Deno
--}
-initContinuations : Value -> Server
-initContinuations actual =
-    Running { actual = actual, nextContinuation = 0, continuations = Dict.empty }
-
-
-insertContinuation : Continuation -> RunningServer -> ( RunningServer, Int )
-insertContinuation continuation server =
-    ( { server
-        | nextContinuation = server.nextContinuation + 1
-        , continuations = Dict.insert server.nextContinuation continuation server.continuations
-      }
-    , server.nextContinuation
-    )
-
-
-getContinuation : Int -> RunningServer -> ( RunningServer, Maybe Continuation )
-getContinuation id server =
-    ( { server | continuations = Dict.remove id server.continuations }
-    , Dict.get id server.continuations
-    )
+                    Http.GoodStatus_ { statusText } body ->
+                        Json.Decode.decodeString Json.Decode.value body
+                            |> Result.map (\bodyJson -> { message = statusText, body = bodyJson })
+                            |> Result.mapError Json.Decode.errorToString
+            )
+                |> Http.stringResolver
+        }

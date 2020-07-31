@@ -31,32 +31,44 @@ handler context =
     case Server.matchPath context of
         Ok [] ->
             context
-                |> Response.setBody indexPage
-                |> Response.send
+                |> Server.respond (Response.default |> Response.setBody indexPage)
 
         Ok [ "hello", name ] ->
-            context
-                |> Response.setBody ("Hello, " ++ name ++ "!")
-                |> Response.send
+            Log.toConsole ("Saying hello to " ++ name)
+                |> Server.andThen
+                    (\_ ->
+                        let
+                            body =
+                                "Hello, " ++ name ++ "!"
+
+                            response =
+                                Response.setBody body Response.default
+                        in
+                        Server.respond response context
+                    )
+
+        -- Basic DB query and response.
+        -- The query will definitely change but the handling of the response will most
+        -- likely stay very similar
+        Result.Ok [ "persons" ] ->
+            Database.query "SELECT * FROM persons;"
+                |> Server.onError (\err -> Server.respond (Response.error err) context)
+                |> Server.onSuccess (\{ body } -> Server.respond (Response.json body) context)
 
         Ok _ ->
-            context
-                |> Response.notFound
-                |> Response.send
+            Server.respond Response.notFound context
 
         Err err ->
-            context
-                |> Response.error err
-                |> Response.send
+            Server.respond (Response.error err) context
 ```
 
 To try it out:
 
 - clone this repo
 - install [Deno](https://deno.land/)
-- from the cloned repo run `deno install -A -f elm-server ./src/main.js`
-  - this compiles the js glue code creates a command called `elm-server`
-- run `elm-server start path/to/your/server.elm`
+- from the cloned repo run `./build.sh`
+  - this compiles the js glue code which creates a command called `elm-server`
+- run `elm-server start path/to/YourServer.elm`
   - this starts your server
 
 ## Docs

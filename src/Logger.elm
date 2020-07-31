@@ -1,16 +1,10 @@
 module Logger exposing (toConsole)
 
-import Internal.Server exposing (Context(..))
+import Internal.Server exposing (Context(..), runTask)
 import Json.Encode
+import Server exposing (ReadyContext)
 
 
-toConsole : String -> Context -> Context
-toConsole message (Context context) =
-    Context
-        { context
-            | commands =
-                { msg = "PRINT"
-                , args = Json.Encode.string message
-                }
-                    :: context.commands
-        }
+toConsole : String -> ReadyContext
+toConsole message =
+    runTask "PRINT" (Json.Encode.string message)

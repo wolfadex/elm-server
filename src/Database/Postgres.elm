@@ -1,7 +1,8 @@
 module Database.Postgres exposing (connect, query)
 
-import Internal.Server exposing (Config(..), Context(..), Continuation, Server(..))
+import Internal.Server exposing (Config(..), Context(..), Server(..), TaskResponse, runTask)
 import Json.Encode
+import Task exposing (Task)
 
 
 connect :
@@ -27,49 +28,6 @@ connect { hostname, port_, user, password, database } (Config config) =
         }
 
 
-query : { text : String, args : List String } -> (Context -> Continuation) -> Context -> Context
-query { text, args } continuation (Context context) =
-    case context.server of
-        NotYetStarted ->
-            Context context
-
-        Running server ->
-            let
-                ( nextServer, continuationKey ) =
-                    Internal.Server.insertContinuation (continuation (Context context)) server
-            in
-            Context
-                { context
-                    | server = Running nextServer
-                    , commands =
-                        { msg = "DATABASE_QUERY"
-                        , args =
-                            Json.Encode.object
-                                [ ( "actual", server.actual )
-                                , ( "query"
-                                  , Json.Encode.object
-                                        [ ( "text", Json.Encode.string text )
-                                        , ( "args", Json.Encode.list Json.Encode.string args )
-                                        ]
-                                  )
-                                , ( "continuationKey", Json.Encode.int continuationKey )
-                                ]
-                        }
-                            :: context.commands
-                }
-
-
-
--- let
---     ( nextServer, continuationKey ) =
---         Server.Internal.insertContinuation continuation server
--- in
--- ( nextServer
--- , { msg = "DATABASE"
---   , args =
---         Json.Encode.object
---             [ ( "query", encodeQuery qry )
---             , ( "continuationKey", Json.Encode.int continuationKey )
---             ]
---   }
--- )
+query : String -> Task String TaskResponse
+query =
+    Json.Encode.string >> runTask "DATABASE_QUERY"

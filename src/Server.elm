@@ -1,27 +1,33 @@
 port module Server exposing
-    ( Command
-    , Config
+    ( Config
     , Context
     , Flags
     , Program
+    , ReadyContext
+    , andThen
     , baseConfig
     , envAtPath
     , getPath
     , makeSecure
+    , map
+    , mapError
     , matchPath
+    , onError
+    , onSuccess
     , program
     , respond
     , withPort
     )
 
 import ContentType
-import Internal.Response exposing (Response(..))
-import Internal.Server exposing (Certs, CommandCmd, Config(..), Context, Server(..), Type(..))
+import Internal.Response exposing (InternalResponse(..))
+import Internal.Server exposing (Certs, Config(..), Context, RunnerResponse, Server(..), Type(..), runTask)
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
 import Platform
 import Result.Extra
-import Status exposing (Status)
+import Status
+import Task exposing (Task)
 
 
 type alias Program =
@@ -34,12 +40,12 @@ type alias Flags =
     }
 
 
-type alias Command =
-    Internal.Server.Command
-
-
 type alias Context =
     Internal.Server.Context
+
+
+type alias ReadyContext =
+    Task String RunnerResponse
 
 
 type alias Config =
@@ -72,16 +78,30 @@ envAtPath envPath (Config config) =
 
 
 type Msg
-    = Incoming CommandCmd
+    = IncomingRequest IncomingRequestData
+    | RunnerMessage RunnerMsg
+    | Continuation (Result String RunnerResponse)
 
 
-port command : CommandCmd -> Cmd msg
+type alias IncomingRequestData =
+    { req : Value
+    , id : String
+    }
 
 
-port respondPort : (CommandCmd -> msg) -> Sub msg
+type alias RunnerMsg =
+    { message : String
+    , value : Value
+    }
 
 
-program : { init : Flags -> Config, handler : Context -> Context } -> Program
+port requestPort : (IncomingRequestData -> msg) -> Sub msg
+
+
+port runnerMsg : (RunnerMsg -> msg) -> Sub msg
+
+
+program : { init : Flags -> Config, handler : Context -> ReadyContext } -> Program
 program { init, handler } =
     Platform.worker
         { init =
@@ -98,27 +118,25 @@ program { init, handler } =
                 in
                 if finalPort < 1 || finalPort > 65535 then
                     ( NotYetStarted
-                    , command
-                        { msg = "PRINT"
-                        , args =
-                            "Error: Invalid port: "
-                                ++ String.fromInt finalPort
-                                ++ ", must be between 1 and 65,535."
-                                |> Json.Encode.string
-                        }
+                    , "Error: Invalid port: "
+                        ++ String.fromInt finalPort
+                        ++ ", must be between 1 and 65,535."
+                        |> Json.Encode.string
+                        |> runTask "PRINT"
+                        |> executeTasks
                     )
 
                 else
-                    ( NotYetStarted
-                      -- TODO: Send DB connection info here too
-                    , [ { msg =
+                    let
+                        serverType =
                             case type_ of
                                 Basic ->
                                     "SERVE"
 
                                 Secure certs ->
                                     "SERVE_SECURE"
-                        , args =
+
+                        startupConfig =
                             Json.Encode.object
                                 [ ( "port", Json.Encode.int finalPort )
                                 , ( "databaseConnection"
@@ -136,13 +154,12 @@ program { init, handler } =
                                                 ]
                                   )
                                 ]
-                        }
-                      , { msg = "PRINT"
-                        , args = Json.Encode.string ("Server starting on port: " ++ String.fromInt finalPort)
-                        }
-                      ]
-                        |> List.map command
-                        |> Cmd.batch
+                    in
+                    ( NotYetStarted
+                    , runTask serverType startupConfig
+                        |> onError (\err -> runTask "PRINT" (Json.Encode.string ("Failed to start server with error: " ++ err)))
+                        |> onSuccess (\_ -> runTask "PRINT" (Json.Encode.string ("Server running on port: " ++ String.fromInt finalPort)))
+                        |> executeTasks
                     )
         , subscriptions = subscriptions
         , update = update handler
@@ -156,95 +173,62 @@ decodeEnv key valDecoder =
 
 subscriptions : Server -> Sub Msg
 subscriptions _ =
-    respondPort Incoming
+    Sub.batch
+        [ requestPort IncomingRequest
+        , runnerMsg RunnerMessage
+        ]
 
 
-update : (Context -> Context) -> Msg -> Server -> ( Server, Cmd Msg )
+executeTasks : Task String RunnerResponse -> Cmd Msg
+executeTasks =
+    Task.attempt Continuation
+
+
+update : (Context -> ReadyContext) -> Msg -> Server -> ( Server, Cmd Msg )
 update handler msg model =
     case msg of
-        Incoming incoming ->
-            case ( model, incoming.msg ) of
-                ( NotYetStarted, "SERVED" ) ->
-                    ( Internal.Server.initContinuations incoming.args
-                    , command
-                        { msg = "PRINT"
-                        , args = Json.Encode.string "Server running..."
-                        }
+        IncomingRequest request ->
+            case model of
+                NotYetStarted ->
+                    ( model, Cmd.none )
+
+                Running ->
+                    ( model
+                    , { request = request.req
+                      , server = Running
+                      , requestId = request.id
+                      }
+                        |> Internal.Server.Context
+                        |> handler
+                        |> executeTasks
                     )
 
-                ( Running server, "REQUEST" ) ->
-                    let
-                        (Internal.Server.Context response) =
-                            { request = incoming.args
-                            , server = Running server
-                            , commands = []
-                            , response = Internal.Response.default
-                            }
-                                |> Internal.Server.Context
-                                |> handler
-                                |> sendResponse
-                    in
-                    ( response.server
-                    , response.commands
-                        |> List.map command
-                        |> Cmd.batch
-                    )
+        RunnerMessage { message } ->
+            case message of
+                "SERVED" ->
+                    ( Running, Cmd.none )
 
-                ( Running server, "CONTINUE" ) ->
-                    case Json.Decode.decodeValue decodeContinue incoming.args of
-                        Err err ->
-                            ( Running server, Cmd.none )
-
-                        Ok { id, result } ->
-                            let
-                                ( nextServer, maybeContinuation ) =
-                                    Internal.Server.getContinuation id server
-                            in
-                            case maybeContinuation of
-                                Nothing ->
-                                    ( Running nextServer, Cmd.none )
-
-                                Just continuation ->
-                                    let
-                                        (Internal.Server.Context response) =
-                                            result
-                                                |> continuation
-                                                |> sendResponse
-                                    in
-                                    ( response.server
-                                    , response.commands
-                                        |> List.map command
-                                        |> Cmd.batch
-                                    )
+                "CLOSED" ->
+                    ( NotYetStarted, Cmd.none )
 
                 _ ->
-                    ( model
-                    , command
-                        { msg = "PRINT"
-                        , args = Json.Encode.string "Handle unknown state"
-                        }
-                    )
+                    Debug.todo ("Handle unknown runner message: " ++ message)
 
+        Continuation result ->
+            case result of
+                Err err ->
+                    Debug.todo ("Handle continuation error: " ++ err)
 
-decodeContinue : Decoder { id : Int, result : Result String Value }
-decodeContinue =
-    Json.Decode.map2 (\id result -> { id = id, result = result })
-        (Json.Decode.field "id" Json.Decode.int)
-        (Json.Decode.field "result" decodeContinueResult)
+                Ok { message, body } ->
+                    case ( model, message ) of
+                        ( _, "CONTINUE" ) ->
+                            ( model, Cmd.none )
 
-
-decodeContinueResult : Decoder (Result String Value)
-decodeContinueResult =
-    -- Json.Decode.field "ok" Json.Decode.bool
-    --     |> Json.Decode.andThen
-    --         (\ok ->
-    --             Json.Decode.field "value" <|
-    --                 if ok then
-    --                     Json.Decode.map Ok Json.Decode.value
-    --                 else
-    --                     Json.Decode.map Err Json.Decode.string
-    --         )
-    Json.Decode.map Ok Json.Decode.value
+                        _ ->
+                            ( model
+                            , runTask "PRINT" (Json.Encode.string ("Handle unknown response: " ++ message))
+                                |> executeTasks
+                            )
 
 
 getPath : Context -> Result String String
@@ -260,63 +244,51 @@ matchPath (Internal.Server.Context { request }) =
         |> Result.map (String.split "/" >> List.filter (not << String.isEmpty))
 
 
-respond : { status : Status, body : String } -> Context -> Context
-respond { status, body } (Internal.Server.Context context) =
-    Internal.Server.Context
-        { context
-            | response =
-                context.response
-                    |> Internal.Response.map (\res -> { res | status = status, body = body })
-                    |> (\response ->
-                            case response of
-                                Sent ->
-                                    response
+respond : InternalResponse -> Context -> Task String RunnerResponse
+respond (InternalResponse { status, body, contentType }) (Internal.Server.Context context) =
+    [ ( "options"
+      , Json.Encode.object
+            [ ( "status"
+              , status
+                    |> Status.toCode
+                    |> Json.Encode.int
+              )
+            , ( "body"
+              , Json.Encode.string body
+              )
+            , ( "contentType"
+              , contentType
+                    |> ContentType.toString
+                    |> Json.Encode.string
+              )
+            ]
+      )
+    , ( "id", Json.Encode.string context.requestId )
+    ]
+        |> Json.Encode.object
+        |> runTask "RESPOND"
 
-                                ReadyToSend _ ->
-                                    response
 
-                                Building r ->
-                                    ReadyToSend r
-                       )
-        }
+andThen : (RunnerResponse -> ReadyContext) -> ReadyContext -> ReadyContext
+andThen =
+    Task.andThen
 
 
-sendResponse : Context -> Context
-sendResponse (Internal.Server.Context context) =
-    case context.response of
-        Sent ->
-            Internal.Server.Context context
+map : (RunnerResponse -> RunnerResponse) -> ReadyContext -> ReadyContext
+map =
+    Task.map
 
-        Building _ ->
-            Internal.Server.Context context
 
-        ReadyToSend response ->
-            Internal.Server.Context
-                { context
-                    | commands =
-                        { msg = "RESPOND"
-                        , args =
-                            Json.Encode.object
-                                [ ( "options"
-                                  , Json.Encode.object
-                                        [ ( "status"
-                                          , response.status
-                                                |> Status.toCode
-                                                |> Json.Encode.int
-                                          )
-                                        , ( "body"
-                                          , Json.Encode.string response.body
-                                          )
-                                        , ( "contentType"
-                                          , response.contentType
-                                                |> ContentType.toString
-                                                |> Json.Encode.string
-                                          )
-                                        ]
-                                  )
-                                , ( "req", context.request )
-                                ]
-                        }
-                            :: context.commands
-                    , response = Sent
-                }
+mapError : (String -> String) -> ReadyContext -> ReadyContext
+mapError =
+    Task.mapError
+
+
+onError : (String -> ReadyContext) -> ReadyContext -> ReadyContext
+onError =
+    Task.onError
+
+
+onSuccess : (RunnerResponse -> ReadyContext) -> ReadyContext -> ReadyContext
+onSuccess =
+    Task.andThen
