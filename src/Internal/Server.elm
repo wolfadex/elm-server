@@ -57,7 +57,9 @@ type Type
 
 
 type alias Certs =
-    ()
+    { certificatePath : String
+    , keyPath : String
+    }
 
 
 type Server

@@ -190,8 +190,18 @@ class XMLHttpRequest {
     switch (request.msg) {
       case "SERVE":
         {
-          const { databaseConnection, port } = request.args;
-          serverInstance = denoHttp.serve({ port });
+          const { databaseConnection, port, certs } = request.args;
+          const options = { port };
+
+          if (certs != null) {
+            serverInstance = denoHttp.serveTLS({
+              ...options,
+              certFile: certs.certificatePath,
+              keyFile: certs.keyPath,
+            });
+          } else {
+            serverInstance = denoHttp.serve(options);
+          }
 
           if (databaseConnection != null) {
             const POOL_CONNECTIONS = 20;

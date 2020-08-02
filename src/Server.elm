@@ -128,14 +128,6 @@ program { init, handler } =
 
                 else
                     let
-                        serverType =
-                            case type_ of
-                                Basic ->
-                                    "SERVE"
-
-                                Secure certs ->
-                                    "SERVE_SECURE"
-
                         startupConfig =
                             Json.Encode.object
                                 [ ( "port", Json.Encode.int finalPort )
@@ -153,10 +145,21 @@ program { init, handler } =
                                                 , ( "database", Json.Encode.string connectionData.database )
                                                 ]
                                   )
+                                , ( "certs"
+                                  , case type_ of
+                                        Basic ->
+                                            Json.Encode.null
+
+                                        Secure { certificatePath, keyPath } ->
+                                            Json.Encode.object
+                                                [ ( "certificatePath", Json.Encode.string certificatePath )
+                                                , ( "keyPath", Json.Encode.string keyPath )
+                                                ]
+                                  )
                                 ]
                     in
                     ( NotYetStarted
-                    , runTask serverType startupConfig
+                    , runTask "SERVE" startupConfig
                         |> onError (\err -> runTask "PRINT" (Json.Encode.string ("Failed to start server with error: " ++ err)))
                         |> onSuccess (\_ -> runTask "PRINT" (Json.Encode.string ("Server running on port: " ++ String.fromInt finalPort)))
                         |> executeTasks
