@@ -267,12 +267,6 @@ class XMLHttpRequest {
           try {
             const client = await databaseConnectionPool.connect();
             const result = await client.query(request.args);
-            // const result = await client.query({
-            //   text: request.args.query.text,
-            //   args: request.args.query.args,
-            //   // text: "SELECT * FROM people WHERE age > $1 AND age < $2;",
-            //   // args: [10, 20],
-            // });
             client.release();
             console.log(result.rows);
             handleResponse({
@@ -282,6 +276,24 @@ class XMLHttpRequest {
             handleResponse({
               status: 500,
               body: err,
+            });
+          }
+        }
+        break;
+      case "FILE_SYSTEM_READ":
+        {
+          try {
+            const decoder = new TextDecoder("utf-8");
+            const fileContent = decoder.decode(
+              await Deno.readFile(request.args)
+            );
+            handleResponse({
+              body: fileContent,
+            });
+          } catch (error) {
+            handleResponse({
+              body: error,
+              status: 500,
             });
           }
         }

@@ -25,6 +25,7 @@ import Internal.Server exposing (Certs, Config(..), Context, RunnerResponse, Ser
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
 import Platform
+import Response
 import Result.Extra
 import Status
 import Task exposing (Task)
@@ -220,7 +221,9 @@ update handler msg model =
         Continuation result ->
             case result of
                 Err err ->
-                    Debug.todo ("Handle continuation error: " ++ err)
+                    -- This happens when the user doesn't handle `Server.onError`
+                    -- respond (Response.error err) context
+                    Debug.todo "handle the user not handling errors, probably need to pass context around"
 
                 Ok { message, body } ->
                     case ( model, message ) of
