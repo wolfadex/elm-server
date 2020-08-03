@@ -24,7 +24,7 @@ handler : Context -> ReadyContext
 handler context =
     case Server.matchPath context of
         Result.Ok [] ->
-            File.load "./examples/hello.htm"
+            File.load "./examples/hello.html"
                 |> Server.onSuccess
                     (\{ body } ->
                         case Json.Decode.decodeValue Json.Decode.string body of

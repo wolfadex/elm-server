@@ -1,38 +1,32 @@
-module MyDb exposing (database)
+module MyDb exposing (main)
 
-import Database.Sqlite exposing (DefaultType(..), Path(..))
-import Dict
+import Database.Postgres as Postgres exposing (ColumnType(..))
 
 
-database : Database.Sqlite.Database
-database =
-    { path = InMemory
-    , tables =
-        Dict.fromList
-            [ ( "Users", users )
+main : Postgres.Database
+main =
+    Postgres.databaseSetup
+        { sourceDirectory = "examples/temp"
+        , enums = []
+        , tables =
+            [ { name = "persons"
+              , columns =
+                    [ Postgres.createColumn
+                        { name = "name"
+                        , type_ = CTText
+                        }
+                    , Postgres.createColumn
+                        { name = "age"
+                        , type_ = CTInteger
+                        }
+                    , { name = "email"
+                      , type_ = CTText
+                      }
+                        |> Postgres.createColumn
+                        |> Postgres.isUnique
+                    ]
+              }
+                |> Postgres.createTable
+                |> Postgres.createTableIfDoesntExist
             ]
-    }
-
-
-users : Database.Sqlite.Table
-users =
-    { primaryKey = [ "email" ]
-    , columns =
-        Dict.fromList
-            [ ( "name"
-              , { type_ = Text (Just "")
-                , isUnique = False
-                }
-              )
-            , ( "age"
-              , { type_ = Integer (Just 0)
-                , isUnique = False
-                }
-              )
-            , ( "email"
-              , { type_ = Text Nothing
-                , isUnique = True
-                }
-              )
-            ]
-    }
+        }
