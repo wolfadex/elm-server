@@ -26,7 +26,7 @@ handler context =
         Result.Ok [] ->
             File.load "./examples/hello.html"
                 |> Server.onSuccess
-                    (\{ body } ->
+                    (\body ->
                         case Json.Decode.decodeValue Json.Decode.string body of
                             Result.Ok file ->
                                 Server.respond

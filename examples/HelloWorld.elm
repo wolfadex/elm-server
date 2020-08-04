@@ -52,42 +52,6 @@ handler context =
                         Server.respond response context
                     )
 
-        Result.Ok [ "persons" ] ->
-            Database.query "SELECT * FROM persons;"
-                |> Server.onError (\err -> Server.respond (Response.error err) context)
-                |> Server.onSuccess (\{ body } -> Server.respond (Response.json body) context)
-
-        -- Result.Ok [ "persons", name, ageStr ] ->
-        --     case String.toInt ageStr of
-        --         Nothing ->
-        --             context
-        --                 |> Server.respond
-        --                     { status = NotAcceptable
-        --                     , body = "Age should be an Int"
-        --                     }
-        --         Just age ->
-        --             context
-        --                 |> Database.query
-        --                     { text = "INSERT INTO persons VALUES(DEFAULT, '" ++ name ++ "', " ++ ageStr ++ ");"
-        --                     , args = []
-        --                     }
-        --                     (\continueContext result ->
-        --                         case result of
-        --                             Result.Ok person ->
-        --                                 continueContext
-        --                                     |> Server.respond
-        --                                         { status = Status.Ok
-        --                                         , body =
-        --                                             [ ( "name", Json.Encode.string name )
-        --                                             , ( "age", Json.Encode.int age )
-        --                                             ]
-        --                                                 |> Json.Encode.object
-        --                                                 |> Json.Encode.encode 0
-        --                                         }
-        --                             Err err ->
-        --                                 continueContext
-        --                                     |> Response.error ("Couldn't create person: " ++ err)
-        --                     )
         Result.Ok _ ->
             Server.respond Response.notFound context
 

@@ -14,25 +14,31 @@ let serverInstance = null;
 let databaseConnectionPool = null;
 
 async function main() {
-  if (Deno.args.length >= 2) {
-    const subcommand = Deno.args[0];
-    const [compiledElm, commnadLineArgs] = await compileElm();
-    const [module, flags] = await buildModule(compiledElm, commnadLineArgs);
-
-    switch (subcommand) {
-      case "start":
+  switch (Deno.args[0]) {
+    case "start":
+      {
+        const [compiledElm, commnadLineArgs] = await compileElm();
+        const [module, flags] = await buildModule(compiledElm, commnadLineArgs);
         runCompiledServer(module, flags);
-        break;
-      case "database":
-        buildDatabase(module, flags);
-        break;
-    }
-  } else {
-    console.log(
-      `Run 'elm-server --help' for a list of commands or visit main.website.com`
-    );
-    exit(1);
+      }
+      break;
+    case "--help":
+      showHelp();
+      break;
+    default:
+      console.log(
+        `Run 'elm-server --help' for a list of commands or visit main.website.com`
+      );
+      exit(1);
+      break;
   }
+}
+
+function showHelp() {
+  console.log(`elm-server commands and options
+
+--help   Displays this text
+  start  Takes a source Elm file, an optional list of args, and starts the server`);
 }
 
 async function compileElm() {
@@ -166,24 +172,6 @@ function findNestedModule(obj) {
   return nestedModules[0];
 }
 
-function buildDatabase(module, flags) {
-  const app = module.init({ flags });
-
-  if (app.ports == null || app.ports.output == null) {
-    console.error("Some notes for building your database.");
-    exit(1);
-  }
-
-  app.ports.output.subscribe(function ({ outputPath, outputContent }) {
-    Deno.writeTextFileSync(outputPath, outputContent);
-  });
-
-  app.ports.error.subscribe(function (error) {
-    console.error(error);
-    exit(1);
-  });
-}
-
 function runCompiledServer(module, flags) {
   // Start Elm program
   // console.log("Debug", flags.environment);
@@ -275,8 +263,10 @@ class XMLHttpRequest {
               );
               exit(1);
             } else {
-              console.lgo;
               const nextId = uuid.generate();
+              const decoder = new TextDecoder();
+              const decodedBody = decoder.decode(await Deno.readAll(req.body));
+              req.elmBody = decodedBody;
               requests[nextId] = req;
               elmServer.ports.requestPort.send({ req, id: nextId });
             }

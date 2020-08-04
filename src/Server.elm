@@ -3,11 +3,13 @@ port module Server exposing
     , Context
     , Flags
     , Method(..)
+    , Path
     , Program
     , ReadyContext
     , andThen
     , baseConfig
     , envAtPath
+    , getBody
     , getMethod
     , getPath
     , makeSecure
@@ -18,16 +20,16 @@ port module Server exposing
     , onSuccess
     , program
     , respond
+    , resultToContext
     , withPort
     )
 
 import ContentType
 import Internal.Response exposing (InternalResponse(..))
-import Internal.Server exposing (Certs, Config(..), Context, RunnerResponse, Server(..), Type(..), runTask)
+import Internal.Server exposing (Certs, Config(..), Context, Server(..), Type(..), runTask)
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
 import Platform
-import Response
 import Result.Extra
 import Status
 import Task exposing (Task)
@@ -48,11 +50,15 @@ type alias Context =
 
 
 type alias ReadyContext =
-    Task String RunnerResponse
+    Task String Value
 
 
 type alias Config =
     Internal.Server.Config
+
+
+type alias Path =
+    List String
 
 
 baseConfig : Config
@@ -83,7 +89,7 @@ envAtPath envPath (Config config) =
 type Msg
     = IncomingRequest IncomingRequestData
     | RunnerMessage RunnerMsg
-    | Continuation (Result String RunnerResponse)
+    | Continuation (Result String Value)
 
 
 type alias IncomingRequestData =
@@ -185,7 +191,7 @@ subscriptions _ =
         ]
 
 
-executeTasks : Task String RunnerResponse -> Cmd Msg
+executeTasks : Task String Value -> Cmd Msg
 executeTasks =
     Task.attempt Continuation
 
@@ -227,16 +233,8 @@ update handler msg model =
                     -- respond (Response.error err) context
                     Debug.todo "handle the user not handling errors, probably need to pass context around"
 
-                Ok { message, body } ->
-                    case ( model, message ) of
-                        ( _, "CONTINUE" ) ->
-                            ( model, Cmd.none )
-
-                        _ ->
-                            ( model
-                            , runTask "PRINT" (Json.Encode.string ("Handle unknown response: " ++ message))
-                                |> executeTasks
-                            )
+                Ok body ->
+                    ( model, Cmd.none )
 
 
 getPath : Context -> Result String String
@@ -257,6 +255,12 @@ getMethod (Internal.Server.Context { request }) =
     Json.Decode.decodeValue (Json.Decode.field "method" Json.Decode.string) request
         |> Result.mapError Json.Decode.errorToString
         |> Result.andThen methodFromString
+
+
+getBody : Context -> Result String String
+getBody (Internal.Server.Context { request }) =
+    Json.Decode.decodeValue (Json.Decode.field "elmBody" Json.Decode.string) request
+        |> Result.mapError Json.Decode.errorToString
 
 
 methodFromString : String -> Result String Method
@@ -285,7 +289,7 @@ type Method
     | Delete
 
 
-respond : InternalResponse -> Context -> Task String RunnerResponse
+respond : InternalResponse -> Context -> Task String Value
 respond (InternalResponse { status, body, contentType }) (Internal.Server.Context context) =
     [ ( "options"
       , Json.Encode.object
@@ -315,12 +319,12 @@ respond (InternalResponse { status, body, contentType }) (Internal.Server.Contex
         |> runTask "RESPOND"
 
 
-andThen : (RunnerResponse -> ReadyContext) -> ReadyContext -> ReadyContext
+andThen : (Value -> ReadyContext) -> ReadyContext -> ReadyContext
 andThen =
     Task.andThen
 
 
-map : (RunnerResponse -> RunnerResponse) -> ReadyContext -> ReadyContext
+map : (Value -> Value) -> ReadyContext -> ReadyContext
 map =
     Task.map
 
@@ -335,6 +339,16 @@ onError =
     Task.onError
 
 
-onSuccess : (RunnerResponse -> ReadyContext) -> ReadyContext -> ReadyContext
+onSuccess : (Value -> ReadyContext) -> ReadyContext -> ReadyContext
 onSuccess =
     Task.andThen
+
+
+resultToContext : Result String Value -> ReadyContext
+resultToContext result =
+    case result of
+        Ok val ->
+            Task.succeed val
+
+        Err err ->
+            Task.fail err

@@ -4,10 +4,12 @@ import Browser exposing (Document)
 import Element exposing (..)
 import Element.Font as Font
 import Element.Input as Input
-import Http
+import Http exposing (Error(..), Response(..))
 import Internal.Server exposing (Request)
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
+import Person exposing (Person)
+import Task
 
 
 main : Program () Model Msg
@@ -32,43 +34,19 @@ type Request d
     | Failure Http.Error
 
 
-decodePersons : Decoder (List Person)
-decodePersons =
-    Json.Decode.list decodePerson
-
-
-decodePerson : Decoder Person
-decodePerson =
-    Json.Decode.map3 Person
-        (Json.Decode.field "id" Json.Decode.int)
-        (Json.Decode.field "name" Json.Decode.string)
-        (Json.Decode.field "age" Json.Decode.int)
-
-
-encodePerson : Person -> Value
-encodePerson { id, name, age } =
-    Json.Encode.object
-        [ ( "id", Json.Encode.int id )
-        , ( "name", Json.Encode.string name )
-        , ( "age", Json.Encode.int age )
-        ]
-
-
-type alias Person =
-    { id : Int
-    , name : String
-    , age : Int
-    }
-
-
 init : () -> ( Model, Cmd Msg )
 init _ =
     ( { persons = Loading }
-    , Http.get
-        { url = "/persons"
-        , expect = Http.expectJson GotPersons decodePersons
-        }
+    , getPeople
     )
+
+
+getPeople : Cmd Msg
+getPeople =
+    Http.get
+        { url = "/persons"
+        , expect = Http.expectJson GotPersons Person.decodeMany
+        }
 
 
 subscriptions : Model -> Sub Msg
@@ -79,8 +57,10 @@ subscriptions model =
 type Msg
     = NoOp
     | GotPersons (Result Http.Error (List Person))
-    | DeletePerson Int
-    | PersonDeleted (Result Http.Error Int)
+    | DeletePerson Person
+    | PersonDeleted (Result Http.Error Person)
+    | CreatePerson
+    | NewPersonAdded (Result Http.Error ())
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -97,14 +77,18 @@ update msg model =
                 Err err ->
                     ( { model | persons = Failure err }, Cmd.none )
 
-        DeletePerson id ->
+        DeletePerson person ->
             ( model
             , Http.request
                 { method = "DELETE"
                 , headers = []
-                , url = "/persons/" ++ String.fromInt id
+                , url =
+                    person
+                        |> Person.getId
+                        |> String.fromInt
+                        |> (++) "/persons/"
                 , body = Http.emptyBody
-                , expect = Http.expectWhatever (Result.map (\() -> id) >> PersonDeleted)
+                , expect = Http.expectWhatever (Result.map (\() -> person) >> PersonDeleted)
                 , timeout = Nothing
                 , tracker = Nothing
                 }
@@ -112,11 +96,11 @@ update msg model =
 
         PersonDeleted response ->
             case ( model.persons, response ) of
-                ( Success persons, Ok deletedId ) ->
+                ( Success persons, Ok deletedPerson ) ->
                     ( { model
                         | persons =
                             persons
-                                |> List.filter (.id >> (/=) deletedId)
+                                |> List.filter (Person.getId >> (/=) (Person.getId deletedPerson))
                                 |> Success
                       }
                     , Cmd.none
@@ -124,6 +108,28 @@ update msg model =
 
                 _ ->
                     ( model, Cmd.none )
+
+        NewPersonAdded response ->
+            case response of
+                Ok () ->
+                    ( { model | persons = Loading }, getPeople )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        CreatePerson ->
+            ( model
+            , Http.post
+                { url = "/persons"
+                , body =
+                    [ ( "name", Json.Encode.string "Barl" )
+                    , ( "age", Json.Encode.int 55 )
+                    ]
+                        |> Json.Encode.object
+                        |> Http.jsonBody
+                , expect = Http.expectWhatever NewPersonAdded
+                }
+            )
 
 
 view : Model -> Document Msg
@@ -151,16 +157,24 @@ viewBody { persons } =
 
                 Success people ->
                     List.map viewPerson people
+        , Input.button []
+            { label = text "Create"
+            , onPress = Just CreatePerson
+            }
         ]
 
 
 viewPerson : Person -> Element Msg
-viewPerson { id, name, age } =
+viewPerson person =
     column []
-        [ text ("Name: " ++ name)
-        , text ("Age: " ++ String.fromInt age)
+        [ text ("Name: " ++ Person.getName person)
+        , person
+            |> Person.getAge
+            |> String.fromInt
+            |> (++) "Age: "
+            |> text
         , Input.button []
             { label = text "Delete"
-            , onPress = Just (DeletePerson id)
+            , onPress = Just (DeletePerson person)
             }
         ]

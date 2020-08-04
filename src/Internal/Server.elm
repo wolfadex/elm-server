@@ -4,7 +4,6 @@ module Internal.Server exposing
     , ConfigData
     , Context(..)
     , Request
-    , RunnerResponse
     , Server(..)
     , Type(..)
     , runTask
@@ -16,12 +15,6 @@ import Json.Decode
 import Json.Encode exposing (Value)
 import Status exposing (Status(..))
 import Task exposing (Task)
-
-
-type alias RunnerResponse =
-    { message : String
-    , body : Value
-    }
 
 
 type alias Request =
@@ -67,7 +60,7 @@ type Server
     | Running
 
 
-runTask : String -> Value -> Task String RunnerResponse
+runTask : String -> Value -> Task String Value
 runTask name value =
     Http.task
         { method = "POST"
@@ -99,7 +92,7 @@ runTask name value =
 
                     Http.GoodStatus_ { statusText } body ->
                         Json.Decode.decodeString Json.Decode.value body
-                            |> Result.map (\bodyJson -> { message = statusText, body = bodyJson })
+                            -- |> Result.map (\bodyJson -> { message = statusText, body = bodyJson })
                             |> Result.mapError Json.Decode.errorToString
             )
                 |> Http.stringResolver

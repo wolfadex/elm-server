@@ -1,16 +1,12 @@
-port module Database.Postgres exposing
+module Database.Postgres exposing
     ( ColumnType(..)
-    , Database
     , Query
-    , Table
     , WhereCondition(..)
     , allowNull
     , connect
     , createColumn
     , createEnum
-    , createTable
-    , createTableIfDoesntExist
-    , databaseSetup
+    , deleteQuery
     , disallowNull
     , doesCheck
     , doesntCheck
@@ -25,41 +21,12 @@ port module Database.Postgres exposing
     , isUnique
     , query
     , selectQuery
+    , wrapString
     )
 
-import Dict exposing (Dict)
-import Html exposing (table)
-import Html.Attributes exposing (name)
-import Internal.Server exposing (Config(..), Context(..), RunnerResponse, Server(..), runTask)
+import Internal.Server exposing (Config(..), Context(..), Server(..), runTask)
 import Json.Encode exposing (Value)
-import Platform
-import Result.Extra
-import String.Extra
 import Task exposing (Task)
-
-
-type alias Database =
-    Platform.Program Flags Model Msg
-
-
-type alias Flags =
-    ()
-
-
-type alias Msg =
-    ()
-
-
-type alias Model =
-    ()
-
-
-type alias Name =
-    String
-
-
-type Table
-    = Table TableConfig
 
 
 type alias TableConfig =
@@ -272,153 +239,6 @@ createEnum { name, variants } =
     Enum { name = name, variants = variants }
 
 
-createTable : { name : String, columns : List Column } -> Table
-createTable { name, columns } =
-    Table { name = name, columns = columns, createIfExists = False }
-
-
-createTableIfDoesntExist : Table -> Table
-createTableIfDoesntExist (Table table) =
-    Table { table | createIfExists = True }
-
-
-type alias DBConfig =
-    { sourceDirectory : String
-    , enums : List Enum
-    , tables : List Table
-    }
-
-
-databaseSetup : DBConfig -> Database
-databaseSetup config =
-    Platform.worker
-        { init = buildDatabase config
-        , update = \_ model -> ( model, Cmd.none )
-        , subscriptions = \_ -> Sub.none
-        }
-
-
-port output : Value -> Cmd msg
-
-
-port error : String -> Cmd msg
-
-
-buildDatabase : DBConfig -> Flags -> ( Model, Cmd Msg )
-buildDatabase config flags =
-    ( ()
-    , config.tables
-        |> List.map (buildTableElm config.enums)
-        |> Result.Extra.combine
-        |> Result.map (List.map (outputHelper config.sourceDirectory) >> Cmd.batch)
-        |> Result.mapError error
-        |> Result.Extra.merge
-    )
-
-
-outputHelper : String -> ( String, String ) -> Cmd msg
-outputHelper sourceDirectory ( path, content ) =
-    [ ( "outputPath", Json.Encode.string (sourceDirectory ++ "/" ++ path) )
-    , ( "outputContent", Json.Encode.string content )
-    ]
-        |> Json.Encode.object
-        |> output
-
-
-buildTableElm : List Enum -> Table -> Result String ( String, String )
-buildTableElm enums (Table { name, columns, createIfExists }) =
-    let
-        moduleName =
-            name
-                |> String.toLower
-                |> String.Extra.toSentenceCase
-
-        typeNamesList =
-            List.map buildCreateColumnArgType columns
-
-        argNamesList =
-            List.map buildCreateColumnArg columns
-    in
-    if String.any (not << Char.isAlpha) moduleName then
-        Err ("Expected a valid table name but found: " ++ name)
-
-    else
-        Ok
-            ( moduleName ++ ".elm"
-            , "module "
-                ++ moduleName
-                ++ """ exposing (insert, select)
-
-import Database.Postgres exposing (WhereCondition)
-import Server exposing (ReadyContext)
-
-
-insert : { """
-                ++ (List.map (\( n, t ) -> n ++ " : " ++ t) typeNamesList |> String.join ", ")
-                ++ """ } -> ReadyContext
-insert { """
-                ++ String.join ", " argNamesList
-                ++ """ } =
-    { tableName = \""""
-                ++ name
-                ++ """"
-    , columnValues =  ["""
-                ++ (List.map buildColumnValsList typeNamesList |> String.join ", ")
-                ++ """]
-    }
-        |> Database.Postgres.insertQuery
-        |> Database.Postgres.query
-
-
-select : { where_ : WhereCondition } -> ReadyContext 
-select { where_ }=
-    { tableName = \""""
-                ++ name
-                ++ """"
-    , where_ = where_
-    }
-        |> Database.Postgres.selectQuery
-        |> Database.Postgres.query
-
-"""
-            )
-
-
-buildColumnValsList : ( String, String ) -> String
-buildColumnValsList ( var, elmType ) =
-    case elmType of
-        "String" ->
-            var
-
-        "Int" ->
-            "String.fromInt " ++ var
-
-        "Float" ->
-            "String.fromFloat " ++ var
-
-        _ ->
-            var
-
-
-boolToString : Bool -> String
-boolToString bool =
-    if bool then
-        "True"
-
-    else
-        "False"
-
-
-buildCreateColumnArgType : Column -> ( String, String )
-buildCreateColumnArgType (Column { name, type_ }) =
-    ( name, columnTypeToElmType type_ )
-
-
-buildCreateColumnArg : Column -> String
-buildCreateColumnArg (Column { name }) =
-    name
-
-
 sqlCreateTable : TableConfig -> String
 sqlCreateTable { name, columns } =
     "CREATE TABLE "
@@ -616,12 +436,17 @@ connect { hostname, port_, user, password, database } (Config config) =
 
 insertQuery : { tableName : String, columnValues : List String } -> Query
 insertQuery { tableName, columnValues } =
-    "INSERT INTO " ++ tableName ++ " VALUES(DEFAULT, '" ++ String.join ", " columnValues ++ ");" |> Query
+    "INSERT INTO " ++ tableName ++ " VALUES(DEFAULT, " ++ String.join ", " columnValues ++ ");" |> Query
 
 
 selectQuery : { tableName : String, where_ : WhereCondition } -> Query
 selectQuery { tableName, where_ } =
     "SELECT * FROM " ++ tableName ++ addWhereClause where_ ++ ";" |> Query
+
+
+deleteQuery : { tableName : String, where_ : WhereCondition } -> Query
+deleteQuery { tableName, where_ } =
+    "DELETE FROM " ++ tableName ++ addWhereClause where_ ++ ";" |> Query
 
 
 addWhereClause : WhereCondition -> String
@@ -704,9 +529,14 @@ type Query
     = Query String
 
 
-query : Query -> Task String RunnerResponse
+query : Query -> Task String Value
 query (Query qry) =
     qry
         |> Debug.log "query"
         |> Json.Encode.string
         |> runTask "DATABASE_QUERY"
+
+
+wrapString : String -> String
+wrapString str =
+    "'" ++ str ++ "'"
