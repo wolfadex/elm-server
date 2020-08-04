@@ -2,11 +2,13 @@ port module Server exposing
     ( Config
     , Context
     , Flags
+    , Method(..)
     , Program
     , ReadyContext
     , andThen
     , baseConfig
     , envAtPath
+    , getMethod
     , getPath
     , makeSecure
     , map
@@ -250,6 +252,39 @@ matchPath (Internal.Server.Context { request }) =
         |> Result.map (String.split "/" >> List.filter (not << String.isEmpty))
 
 
+getMethod : Context -> Result String Method
+getMethod (Internal.Server.Context { request }) =
+    Json.Decode.decodeValue (Json.Decode.field "method" Json.Decode.string) request
+        |> Result.mapError Json.Decode.errorToString
+        |> Result.andThen methodFromString
+
+
+methodFromString : String -> Result String Method
+methodFromString method =
+    case method of
+        "GET" ->
+            Ok Get
+
+        "POST" ->
+            Ok Post
+
+        "PUT" ->
+            Ok Put
+
+        "DELETE" ->
+            Ok Delete
+
+        _ ->
+            Err ("Unknown method: " ++ method)
+
+
+type Method
+    = Get
+    | Post
+    | Put
+    | Delete
+
+
 respond : InternalResponse -> Context -> Task String RunnerResponse
 respond (InternalResponse { status, body, contentType }) (Internal.Server.Context context) =
     [ ( "options"
@@ -262,10 +297,15 @@ respond (InternalResponse { status, body, contentType }) (Internal.Server.Contex
             , ( "body"
               , Json.Encode.string body
               )
-            , ( "contentType"
-              , contentType
-                    |> ContentType.toString
-                    |> Json.Encode.string
+            , ( "headers"
+              , [ [ Json.Encode.string "Content-Type"
+                  , contentType
+                        |> ContentType.toString
+                        |> Json.Encode.string
+                  ]
+                ]
+                    |> List.map (Json.Encode.list identity)
+                    |> Json.Encode.list identity
               )
             ]
       )

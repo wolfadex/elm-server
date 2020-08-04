@@ -1,6 +1,7 @@
 port module Database.Postgres exposing
     ( ColumnType(..)
     , Database
+    , Query
     , Table
     , WhereCondition(..)
     , allowNull
@@ -317,7 +318,7 @@ buildDatabase config flags =
 
 outputHelper : String -> ( String, String ) -> Cmd msg
 outputHelper sourceDirectory ( path, content ) =
-    [ ( "outputPath", Json.Encode.string (sourceDirectory ++ path) )
+    [ ( "outputPath", Json.Encode.string (sourceDirectory ++ "/" ++ path) )
     , ( "outputContent", Json.Encode.string content )
     ]
         |> Json.Encode.object
@@ -331,6 +332,12 @@ buildTableElm enums (Table { name, columns, createIfExists }) =
             name
                 |> String.toLower
                 |> String.Extra.toSentenceCase
+
+        typeNamesList =
+            List.map buildCreateColumnArgType columns
+
+        argNamesList =
+            List.map buildCreateColumnArg columns
     in
     if String.any (not << Char.isAlpha) moduleName then
         Err ("Expected a valid table name but found: " ++ name)
@@ -340,40 +347,57 @@ buildTableElm enums (Table { name, columns, createIfExists }) =
             ( moduleName ++ ".elm"
             , "module "
                 ++ moduleName
-                ++ """ exposing (..)
+                ++ """ exposing (insert, select)
 
-import Database.Postgres exposing (Query)
+import Database.Postgres exposing (WhereCondition)
 import Server exposing (ReadyContext)
-import Task exposing (Task)
 
 
 insert : { """
-                ++ (List.map buildCreateColumnArgType columns |> String.join ", ")
+                ++ (List.map (\( n, t ) -> n ++ " : " ++ t) typeNamesList |> String.join ", ")
                 ++ """ } -> ReadyContext
 insert { """
-                ++ (List.map buildCreateColumnArg columns |> String.join ", ")
+                ++ String.join ", " argNamesList
                 ++ """ } =
     { tableName = \""""
                 ++ name
                 ++ """"
-    , columnValues = List.map Database.Postgres.columnValueToString columns
+    , columnValues =  ["""
+                ++ (List.map buildColumnValsList typeNamesList |> String.join ", ")
+                ++ """]
     }
         |> Database.Postgres.insertQuery
         |> Database.Postgres.query
 
 
-select : { where : List Condition } -> ReadyContext 
-select { where }=
-    { tableName = """
+select : { where_ : WhereCondition } -> ReadyContext 
+select { where_ }=
+    { tableName = \""""
                 ++ name
-                ++ """
-    , where = where
+                ++ """"
+    , where_ = where_
     }
         |> Database.Postgres.selectQuery
         |> Database.Postgres.query
 
 """
             )
+
+
+buildColumnValsList : ( String, String ) -> String
+buildColumnValsList ( var, elmType ) =
+    case elmType of
+        "String" ->
+            var
+
+        "Int" ->
+            "String.fromInt " ++ var
+
+        "Float" ->
+            "String.fromFloat " ++ var
+
+        _ ->
+            var
 
 
 boolToString : Bool -> String
@@ -385,9 +409,9 @@ boolToString bool =
         "False"
 
 
-buildCreateColumnArgType : Column -> String
+buildCreateColumnArgType : Column -> ( String, String )
 buildCreateColumnArgType (Column { name, type_ }) =
-    name ++ " : " ++ columnTypeToString type_
+    ( name, columnTypeToElmType type_ )
 
 
 buildCreateColumnArg : Column -> String
@@ -411,7 +435,7 @@ columnCreateFormat : Column -> String
 columnCreateFormat (Column { name, type_, constraints }) =
     name
         ++ " "
-        ++ typeToString type_
+        ++ columnTypeToSQLName type_
         ++ " "
         ++ (if constraints.isPrimaryKey then
                 "PRIMARY KEY "
@@ -421,8 +445,8 @@ columnCreateFormat (Column { name, type_, constraints }) =
            )
 
 
-typeToString : ColumnType -> String
-typeToString type_ =
+columnTypeToSQLName : ColumnType -> String
+columnTypeToSQLName type_ =
     case type_ of
         CTSmallInt ->
             "SMALLINT"
@@ -494,8 +518,8 @@ typeToString type_ =
             "???"
 
 
-columnTypeToString : ColumnType -> String
-columnTypeToString type_ =
+columnTypeToElmType : ColumnType -> String
+columnTypeToElmType type_ =
     case type_ of
         CTSmallInt ->
             "__"
@@ -683,5 +707,6 @@ type Query
 query : Query -> Task String RunnerResponse
 query (Query qry) =
     qry
+        |> Debug.log "query"
         |> Json.Encode.string
         |> runTask "DATABASE_QUERY"

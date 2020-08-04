@@ -275,6 +275,7 @@ class XMLHttpRequest {
               );
               exit(1);
             } else {
+              console.lgo;
               const nextId = uuid.generate();
               requests[nextId] = req;
               elmServer.ports.requestPort.send({ req, id: nextId });
@@ -284,10 +285,22 @@ class XMLHttpRequest {
         break;
       case "RESPOND":
         {
+          console.log("requests", request.args.id);
           const req = requests[request.args.id];
-          req.respond(request.args.options);
-          delete requests[request.args.id];
-          handleResponse();
+          if (req != null) {
+            const { headers, ...restOptions } = request.args.options;
+            const actualHeaders = new Headers();
+
+            headers.forEach(function ([key, val]) {
+              actualHeaders.set(key, val);
+            });
+
+            req.respond({ ...restOptions, headers: actualHeaders });
+            delete requests[request.args.id];
+            handleResponse();
+          } else {
+            handleResponse();
+          }
         }
         break;
       case "CLOSE":
@@ -306,12 +319,13 @@ class XMLHttpRequest {
           try {
             const client = await databaseConnectionPool.connect();
             const result = await client.query(request.args);
+
             client.release();
-            console.log(result.rows);
             handleResponse({
               body: result.rows,
             });
           } catch (err) {
+            console.log("query error", err);
             handleResponse({
               status: 500,
               body: err,

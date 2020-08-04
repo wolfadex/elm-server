@@ -58,7 +58,10 @@ json body =
     Internal.Response.base
         |> Internal.Response.map
             (\r ->
-                { r | status = InternalServerError, body = Json.Encode.encode 0 body }
+                { r
+                    | body = Json.Encode.encode 0 body
+                    , contentType = Application_Json
+                }
             )
 
 

@@ -6,7 +6,7 @@ import Database.Postgres as Postgres exposing (ColumnType(..))
 main : Postgres.Database
 main =
     Postgres.databaseSetup
-        { sourceDirectory = "examples/temp"
+        { sourceDirectory = "examples-db"
         , enums = []
         , tables =
             [ { name = "persons"
@@ -19,11 +19,12 @@ main =
                         { name = "age"
                         , type_ = CTInteger
                         }
-                    , { name = "email"
-                      , type_ = CTText
-                      }
-                        |> Postgres.createColumn
-                        |> Postgres.isUnique
+
+                    -- , { name = "email"
+                    --   , type_ = CTText
+                    --   }
+                    --     |> Postgres.createColumn
+                    --     |> Postgres.isUnique
                     ]
               }
                 |> Postgres.createTable
