@@ -12,11 +12,12 @@ module Person exposing
     )
 
 import Database.Postgres exposing (WhereCondition(..))
-import Internal.Server exposing (Context(..))
+import Http exposing (Response)
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
 import Response
-import Server exposing (Method(..), Path, ReadyContext)
+import Result.Extra
+import Server exposing (Method(..), Path, Request, Response)
 
 
 tableName : String
@@ -24,13 +25,13 @@ tableName =
     "persons"
 
 
-create : PartialPerson -> ReadyContext
+create : PartialPerson -> Response
 create (PartialPerson _ { name, age }) =
     if String.isEmpty name then
-        Server.resultToContext (Err "Must have a name")
+        Server.resultToResponse (Err "Must have a name")
 
     else if age < 0 then
-        Server.resultToContext (Err "Age must be a positive number")
+        Server.resultToResponse (Err "Age must be a positive number")
 
     else
         { tableName = tableName
@@ -40,17 +41,17 @@ create (PartialPerson _ { name, age }) =
             |> Database.Postgres.query
 
 
-get : WhereCondition -> ReadyContext
+get : WhereCondition -> Response
 get where_ =
     { tableName = tableName
     , where_ = where_
     }
         |> Database.Postgres.selectQuery
         |> Database.Postgres.query
-        |> Server.andThen (reencode >> Server.resultToContext)
+        |> Server.andThen (reencode >> Server.resultToResponse)
 
 
-delete : Int -> ReadyContext
+delete : Int -> Response
 delete id =
     { tableName = tableName
     , where_ = Equal "id" (String.fromInt id)
@@ -158,47 +159,54 @@ new =
         }
 
 
-handler : Path -> Context -> ReadyContext
-handler path context =
+handler : Request -> Path -> Response
+handler request path =
     case path of
         [] ->
-            case Server.getMethod context of
-                Ok Get ->
-                    get NoCondition
-                        |> Server.onError (\err -> Server.respond (Response.error err) context)
-                        |> Server.onSuccess (\persons -> Server.respond (Response.json persons) context)
+            Server.getMethod request
+                |> Result.mapError (Response.error >> Server.respond request)
+                |> Result.map
+                    (\method ->
+                        case method of
+                            Get ->
+                                get NoCondition
+                                    |> Server.onError (Response.error >> Server.respond request)
+                                    |> Server.onSuccess (Response.json >> Server.respond request)
 
-                Ok Post ->
-                    case Server.getBody context |> Result.andThen (Json.Decode.decodeString decodePartial >> Result.mapError Json.Decode.errorToString) of
-                        Ok partialPerson ->
-                            create partialPerson
-                                |> Server.onError (\err -> Server.respond (Response.error err) context)
-                                |> Server.onSuccess (\id -> Server.respond (Response.json id) context)
+                            Post ->
+                                Server.getBody request
+                                    |> Result.andThen
+                                        (Json.Decode.decodeString decodePartial
+                                            >> Result.mapError Json.Decode.errorToString
+                                        )
+                                    |> Result.mapError (Response.error >> Server.respond request)
+                                    |> Result.map
+                                        (create
+                                            >> Server.onError (Response.error >> Server.respond request)
+                                            >> Server.onSuccess (Response.json >> Server.respond request)
+                                        )
+                                    |> Result.Extra.merge
 
-                        Err err ->
-                            Server.respond (Response.error err) context
-
-                Ok _ ->
-                    Server.respond Response.methodNotAllowed context
-
-                Err err ->
-                    Server.respond (Response.error err) context
+                            _ ->
+                                Server.respond request Response.methodNotAllowed
+                    )
+                |> Result.Extra.merge
 
         [ maybeId ] ->
-            case ( Server.getMethod context, String.toInt maybeId ) of
+            case ( Server.getMethod request, String.toInt maybeId ) of
                 ( Ok Delete, Just id ) ->
                     delete id
-                        |> Server.onError (\err -> Server.respond (Response.error err) context)
-                        |> Server.onSuccess (\persons -> Server.respond (Response.json persons) context)
+                        |> Server.onError (Response.error >> Server.respond request)
+                        |> Server.onSuccess (Response.json >> Server.respond request)
 
                 ( Ok _, Just _ ) ->
-                    Server.respond Response.methodNotAllowed context
+                    Server.respond request Response.methodNotAllowed
 
                 ( Ok _, Nothing ) ->
-                    Server.respond (Response.error "Expected a valid id") context
+                    Server.respond request (Response.error "Expected a valid id")
 
                 ( Err err, _ ) ->
-                    Server.respond (Response.error err) context
+                    Server.respond request (Response.error err)
 
         _ ->
-            Server.respond Response.notFound context
+            Server.respond request Response.notFound

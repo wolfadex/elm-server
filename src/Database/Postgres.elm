@@ -24,7 +24,7 @@ module Database.Postgres exposing
     , wrapString
     )
 
-import Internal.Server exposing (Config(..), Context(..), Server(..), runTask)
+import Internal.Server exposing (Config(..), runTask)
 import Json.Encode exposing (Value)
 import Task exposing (Task)
 

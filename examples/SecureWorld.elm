@@ -1,7 +1,7 @@
 module SecureWorld exposing (main)
 
 import Response
-import Server exposing (Config, Context, Flags, ReadyContext)
+import Server exposing (Config, Flags, Request, Response)
 import Status exposing (Status(..))
 
 
@@ -22,14 +22,14 @@ init _ =
             }
 
 
-handler : Context -> ReadyContext
-handler context =
-    case Server.matchPath context of
+handler : Request -> Response
+handler request =
+    case Server.matchPath request of
         Result.Ok [] ->
-            Server.respond (Response.default |> Response.setBody "Hello, HTTPS") context
+            Server.respond request (Response.default |> Response.setBody "Hello, HTTPS")
 
         Result.Ok _ ->
-            Server.respond Response.notFound context
+            Server.respond request Response.notFound
 
         Err err ->
-            Server.respond (Response.error err) context
+            Server.respond request (Response.error err)

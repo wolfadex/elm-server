@@ -15,7 +15,6 @@ module Response exposing
 import ContentType exposing (ContentType(..))
 import Http exposing (Response)
 import Internal.Response exposing (Header, InternalResponse(..))
-import Internal.Server exposing (Context(..))
 import Json.Encode exposing (Value)
 import Status exposing (Status(..))
 

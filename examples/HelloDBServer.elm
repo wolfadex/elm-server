@@ -5,7 +5,8 @@ import File
 import Json.Decode
 import Person
 import Response
-import Server exposing (Config, Context, Flags, Method(..), ReadyContext)
+import Result.Extra
+import Server exposing (Config, Flags, Method(..), Request, Response)
 import Status exposing (Status(..))
 
 
@@ -29,36 +30,32 @@ init _ =
             }
 
 
-handler : Context -> ReadyContext
-handler context =
-    case Server.matchPath context of
+handler : Request -> Response
+handler request =
+    case Server.matchPath request of
         Result.Ok path ->
             case path of
                 [] ->
                     File.load "./examples/hello-db-client.html"
                         |> Server.onSuccess
-                            (\body ->
-                                case Json.Decode.decodeValue Json.Decode.string body of
-                                    Result.Ok file ->
-                                        Server.respond
-                                            (Response.default |> Response.setBody file)
-                                            context
-
-                                    Err err ->
-                                        Server.respond
-                                            (err
-                                                |> Json.Decode.errorToString
-                                                |> Response.error
-                                            )
-                                            context
+                            (Json.Decode.decodeValue Json.Decode.string
+                                >> Result.map
+                                    (\file ->
+                                        Response.default
+                                            |> Response.setBody file
+                                            |> Server.respond request
+                                    )
+                                >> Result.mapError
+                                    (Json.Decode.errorToString >> Response.error >> Server.respond request)
+                                >> Result.Extra.merge
                             )
-                        |> Server.onError (\err -> Server.respond (Response.error err) context)
+                        |> Server.onError (Response.error >> Server.respond request)
 
-                "persons" :: rest ->
-                    Person.handler rest context
+                "persons" :: restOfPath ->
+                    Person.handler request restOfPath
 
                 _ ->
-                    Server.respond Response.notFound context
+                    Server.respond request Response.notFound
 
         Err err ->
-            Server.respond (Response.error err) context
+            Server.respond request (Response.error err)

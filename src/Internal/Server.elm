@@ -2,9 +2,7 @@ module Internal.Server exposing
     ( Certs
     , Config(..)
     , ConfigData
-    , Context(..)
-    , Request
-    , Server(..)
+    , RequestData
     , Type(..)
     , runTask
     )
@@ -17,17 +15,8 @@ import Status exposing (Status(..))
 import Task exposing (Task)
 
 
-type alias Request =
-    Value
-
-
-type Context
-    = Context ContextData
-
-
-type alias ContextData =
-    { request : Request
-    , server : Server
+type alias RequestData =
+    { request : Value
     , requestId : String
     }
 
@@ -53,11 +42,6 @@ type alias Certs =
     { certificatePath : String
     , keyPath : String
     }
-
-
-type Server
-    = NotYetStarted
-    | Running
 
 
 runTask : String -> Value -> Task String Value
