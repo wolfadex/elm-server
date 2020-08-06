@@ -1,12 +1,10 @@
 module HelloWorld exposing (main)
 
-import Database.Postgres as Database
 import Html.String as Html
 import Html.String.Attributes as Attr
 import Logger as Log
 import Response
 import Server exposing (Config, Flags, Request, Response)
-import Status exposing (Status(..))
 
 
 main : Server.Program
@@ -20,13 +18,6 @@ main =
 init : Flags -> Config
 init _ =
     Server.baseConfig
-        |> Database.connect
-            { hostname = "localhost"
-            , port_ = 5432
-            , database = "postgres"
-            , user = "postgres"
-            , password = "postgres"
-            }
 
 
 handler : Request -> Response
