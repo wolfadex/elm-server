@@ -1,10 +1,10 @@
 module File exposing (load)
 
-import Internal.Server exposing (Context(..), runTask)
+import Internal.Server exposing (runTask)
 import Json.Encode
-import Server exposing (ReadyContext)
+import Server exposing (Response)
 
 
-load : String -> ReadyContext
+load : String -> Response
 load path =
     runTask "FILE_SYSTEM_READ" (Json.Encode.string path)

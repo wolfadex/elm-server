@@ -14,52 +14,115 @@ let serverInstance = null;
 let databaseConnectionPool = null;
 
 async function main() {
-  if (Deno.args.length >= 2) {
-    const subcommand = Deno.args[0];
-    if (subcommand !== "start") {
-      console.log(`Run as 'elm-server start Server.elm [arguments]'`);
-      console.log(subcommand);
-      exit(1);
-    }
-    const sourceFileName = Deno.args[1];
-    const commandLineArgs = Deno.args.slice(2);
-    const absolutePath = path.resolve(sourceFileName);
-    const extension = path.extname(absolutePath);
-    if (extension === ".js") {
-      runCompiledJs(absolutePath, commandLineArgs);
-    } else if (extension === ".elm") {
-      const tempDirectory = createTemporaryDirectory();
-      const tempFileName = path.resolve(tempDirectory, "main.js");
-      const elmFileDirectory = path.dirname(absolutePath);
-      const elmProcess = Deno.run({
-        cmd: [
-          "elm",
-          "make",
-          // "--optimize", TODO: Uncomment this
-          "--output=" + tempFileName,
-          absolutePath,
-        ],
-        stdout: "piped",
-        cwd: elmFileDirectory,
-      });
-      const elmResult = await elmProcess.status();
-      if (elmResult.success) {
-        runCompiledJs(tempFileName, commandLineArgs);
-      } else {
-        // The Elm compiler will have printed out a compilation error
-        // message, no need to add our own
-        exit(1);
+  switch (Deno.args[0]) {
+    case "start":
+      {
+        const [compiledElm, commnadLineArgs] = await compileElm();
+        const [module, flags] = await buildModule(compiledElm, commnadLineArgs);
+        runCompiledServer(module, flags);
       }
-    } else {
+      break;
+    case "--help":
+      showHelp();
+      break;
+    default:
       console.log(
-        `Unrecognized source file extension ${extension} (expecting.elm or.js)`
+        `Run 'elm-server --help' for a list of commands or visit main.website.com`
       );
+      exit(1);
+      break;
+  }
+}
+
+function showHelp() {
+  console.log(`elm-server commands and options
+
+--help   Displays this text
+  start  Takes a source Elm file, an optional list of args, and starts the server`);
+}
+
+async function compileElm() {
+  const sourceFileName = Deno.args[1];
+  const commandLineArgs = Deno.args.slice(2);
+  const absolutePath = path.resolve(sourceFileName);
+  const extension = path.extname(absolutePath);
+
+  if (extension === ".js") {
+    return [absolutePath, commandLineArgs];
+  } else if (extension === ".elm") {
+    const tempDirectory = createTemporaryDirectory();
+    const tempFileName = path.resolve(tempDirectory, "main.js");
+    const elmFileDirectory = path.dirname(absolutePath);
+    const elmProcess = Deno.run({
+      cmd: [
+        "elm",
+        "make",
+        // "--optimize", TODO: Uncomment this
+        "--output=" + tempFileName,
+        absolutePath,
+      ],
+      stdout: "piped",
+      cwd: elmFileDirectory,
+    });
+    const elmResult = await elmProcess.status();
+
+    if (elmResult.success) {
+      return [tempFileName, commandLineArgs];
+    } else {
+      // The Elm compiler will have printed out a compilation error
+      // message, no need to add our own
       exit(1);
     }
   } else {
-    console.log(`Run as 'elm-server start Server.elm [arguments]'`);
+    console.log(
+      `Unrecognized source file extension ${extension} (expecting.elm or.js)`
+    );
     exit(1);
   }
+}
+
+async function buildModule(jsFileName, commandLineArgs) {
+  // Read compiled JS from file
+  const jsData = Deno.readFileSync(jsFileName);
+  const jsText = new TextDecoder("utf-8").decode(jsData);
+
+  // Add our mock XMLHttpRequest class into the global namespace
+  // so that Elm code will use it
+  globalThis["XMLHttpRequest"] = XMLHttpRequest;
+
+  // Run Elm code to create the 'Elm' object
+  const globalEval = eval;
+  globalEval(jsText);
+
+  // Collect flags to pass to Elm program
+  const flags = {};
+  flags["arguments"] = parseFlags(commandLineArgs);
+  switch (Deno.build.os) {
+    case "mac":
+    case "darwin":
+    case "linux":
+      flags["platform"] = {
+        type: "posix",
+        name: Deno.build.os,
+      };
+      break;
+    case "windows":
+      flags["platform"] = { type: "windows" };
+      break;
+    default:
+      console.log("Unrecognized OS '" + Deno.build.os + "'");
+      exit(1);
+  }
+  flags["environment"] = Deno.env.toObject();
+  // flags["workingDirectory"] = Deno.cwd();
+
+  // Get Elm program object
+  var module = findNestedModule(globalThis["Elm"]);
+  while (!("init" in module)) {
+    module = findNestedModule(module);
+  }
+
+  return [module, flags];
 }
 
 function exit(code) {
@@ -109,43 +172,7 @@ function findNestedModule(obj) {
   return nestedModules[0];
 }
 
-function runCompiledJs(jsFileName, commandLineArgs) {
-  // Read compiled JS from file
-  const jsData = Deno.readFileSync(jsFileName);
-  const jsText = new TextDecoder("utf-8").decode(jsData);
-
-  // Add our mock XMLHttpRequest class into the global namespace
-  // so that Elm code will use it
-  globalThis["XMLHttpRequest"] = XMLHttpRequest;
-
-  // Run Elm code to create the 'Elm' object
-  const globalEval = eval;
-  globalEval(jsText);
-
-  // Collect flags to pass to Elm program
-  const flags = {};
-  flags["arguments"] = parseFlags(commandLineArgs);
-  switch (Deno.build.os) {
-    case "mac":
-    case "darwin":
-    case "linux":
-      flags["platform"] = { type: "posix", name: Deno.build.os };
-      break;
-    case "windows":
-      flags["platform"] = { type: "windows" };
-      break;
-    default:
-      console.log("Unrecognized OS '" + Deno.build.os + "'");
-      exit(1);
-  }
-  flags["environment"] = Deno.env.toObject();
-  // flags["workingDirectory"] = Deno.cwd();
-
-  // Get Elm program object
-  var module = findNestedModule(globalThis["Elm"]);
-  while (!("init" in module)) {
-    module = findNestedModule(module);
-  }
+function runCompiledServer(module, flags) {
   // Start Elm program
   // console.log("Debug", flags.environment);
   elmServer = module.init({ flags });
@@ -237,6 +264,9 @@ class XMLHttpRequest {
               exit(1);
             } else {
               const nextId = uuid.generate();
+              const decoder = new TextDecoder();
+              const decodedBody = decoder.decode(await Deno.readAll(req.body));
+              req.elmBody = decodedBody;
               requests[nextId] = req;
               elmServer.ports.requestPort.send({ req, id: nextId });
             }
@@ -245,10 +275,22 @@ class XMLHttpRequest {
         break;
       case "RESPOND":
         {
+          console.log("requests", request.args.id);
           const req = requests[request.args.id];
-          req.respond(request.args.options);
-          delete requests[request.args.id];
-          handleResponse();
+          if (req != null) {
+            const { headers, ...restOptions } = request.args.options;
+            const actualHeaders = new Headers();
+
+            headers.forEach(function ([key, val]) {
+              actualHeaders.set(key, val);
+            });
+
+            req.respond({ ...restOptions, headers: actualHeaders });
+            delete requests[request.args.id];
+            handleResponse();
+          } else {
+            handleResponse();
+          }
         }
         break;
       case "CLOSE":
@@ -267,12 +309,13 @@ class XMLHttpRequest {
           try {
             const client = await databaseConnectionPool.connect();
             const result = await client.query(request.args);
+
             client.release();
-            console.log(result.rows);
             handleResponse({
               body: result.rows,
             });
           } catch (err) {
+            console.log("query error", err);
             handleResponse({
               status: 500,
               body: err,

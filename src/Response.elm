@@ -15,7 +15,6 @@ module Response exposing
 import ContentType exposing (ContentType(..))
 import Http exposing (Response)
 import Internal.Response exposing (Header, InternalResponse(..))
-import Internal.Server exposing (Context(..))
 import Json.Encode exposing (Value)
 import Status exposing (Status(..))
 
@@ -58,7 +57,10 @@ json body =
     Internal.Response.base
         |> Internal.Response.map
             (\r ->
-                { r | status = InternalServerError, body = Json.Encode.encode 0 body }
+                { r
+                    | body = Json.Encode.encode 0 body
+                    , contentType = Application_Json
+                }
             )
 
 

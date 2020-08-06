@@ -3,7 +3,8 @@ module HelloFile exposing (main)
 import File
 import Json.Decode
 import Response
-import Server exposing (Config, Context, Flags, ReadyContext)
+import Result.Extra
+import Server exposing (Config, Flags, Request, Response)
 import Status exposing (Status(..))
 
 
@@ -20,31 +21,27 @@ init _ =
     Server.baseConfig
 
 
-handler : Context -> ReadyContext
-handler context =
-    case Server.matchPath context of
+handler : Request -> Response
+handler request =
+    case Server.matchPath request of
         Result.Ok [] ->
-            File.load "./examples/hello.htm"
+            File.load "./examples/hello.html"
                 |> Server.onSuccess
-                    (\{ body } ->
-                        case Json.Decode.decodeValue Json.Decode.string body of
-                            Result.Ok file ->
-                                Server.respond
-                                    (Response.default |> Response.setBody file)
-                                    context
-
-                            Err err ->
-                                Server.respond
-                                    (err
-                                        |> Json.Decode.errorToString
-                                        |> Response.error
-                                    )
-                                    context
+                    (Json.Decode.decodeValue Json.Decode.string
+                        >> Result.map
+                            (\file ->
+                                Response.default
+                                    |> Response.setBody file
+                                    |> Server.respond request
+                            )
+                        >> Result.mapError
+                            (Json.Decode.errorToString >> Response.error >> Server.respond request)
+                        >> Result.Extra.merge
                     )
-                |> Server.onError (\err -> Server.respond (Response.error err) context)
+                |> Server.onError (Response.error >> Server.respond request)
 
         Result.Ok _ ->
-            Server.respond Response.notFound context
+            Server.respond request Response.notFound
 
         Err err ->
-            Server.respond (Response.error err) context
+            Server.respond request (Response.error err)

@@ -1,12 +1,16 @@
 port module Server exposing
     ( Config
-    , Context
     , Flags
+    , Method(..)
+    , Path
     , Program
-    , ReadyContext
+    , Request
+    , Response
     , andThen
     , baseConfig
     , envAtPath
+    , getBody
+    , getMethod
     , getPath
     , makeSecure
     , map
@@ -16,23 +20,23 @@ port module Server exposing
     , onSuccess
     , program
     , respond
+    , resultToResponse
     , withPort
     )
 
 import ContentType
 import Internal.Response exposing (InternalResponse(..))
-import Internal.Server exposing (Certs, Config(..), Context, RunnerResponse, Server(..), Type(..), runTask)
+import Internal.Server exposing (Certs, Config(..), RequestData, Type(..), runTask)
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
 import Platform
-import Response
 import Result.Extra
 import Status
 import Task exposing (Task)
 
 
 type alias Program =
-    Platform.Program Flags Server Msg
+    Platform.Program Flags () Msg
 
 
 type alias Flags =
@@ -41,16 +45,28 @@ type alias Flags =
     }
 
 
-type alias Context =
-    Internal.Server.Context
+{-|
+
+    { request = Request -- The actual request object
+    , server = Server -- NotYetStarted | Running
+    , requestId = String -- ID for retrieving the request on the other side
+    }
+
+-}
+type Request
+    = Request RequestData
 
 
-type alias ReadyContext =
-    Task String RunnerResponse
+type alias Response =
+    Task String Value
 
 
 type alias Config =
     Internal.Server.Config
+
+
+type alias Path =
+    List String
 
 
 baseConfig : Config
@@ -81,7 +97,7 @@ envAtPath envPath (Config config) =
 type Msg
     = IncomingRequest IncomingRequestData
     | RunnerMessage RunnerMsg
-    | Continuation (Result String RunnerResponse)
+    | Continuation (Result String Value)
 
 
 type alias IncomingRequestData =
@@ -102,7 +118,7 @@ port requestPort : (IncomingRequestData -> msg) -> Sub msg
 port runnerMsg : (RunnerMsg -> msg) -> Sub msg
 
 
-program : { init : Flags -> Config, handler : Context -> ReadyContext } -> Program
+program : { init : Flags -> Config, handler : Request -> Response } -> Program
 program { init, handler } =
     Platform.worker
         { init =
@@ -118,7 +134,7 @@ program { init, handler } =
                             |> Maybe.withDefault port_
                 in
                 if finalPort < 1 || finalPort > 65535 then
-                    ( NotYetStarted
+                    ( ()
                     , "Error: Invalid port: "
                         ++ String.fromInt finalPort
                         ++ ", must be between 1 and 65,535."
@@ -159,7 +175,7 @@ program { init, handler } =
                                   )
                                 ]
                     in
-                    ( NotYetStarted
+                    ( ()
                     , runTask "SERVE" startupConfig
                         |> onError (\err -> runTask "PRINT" (Json.Encode.string ("Failed to start server with error: " ++ err)))
                         |> onSuccess (\_ -> runTask "PRINT" (Json.Encode.string ("Server running on port: " ++ String.fromInt finalPort)))
@@ -175,45 +191,38 @@ decodeEnv key valDecoder =
     Json.Decode.field key valDecoder
 
 
-subscriptions : Server -> Sub Msg
-subscriptions _ =
+subscriptions : () -> Sub Msg
+subscriptions () =
     Sub.batch
         [ requestPort IncomingRequest
         , runnerMsg RunnerMessage
         ]
 
 
-executeTasks : Task String RunnerResponse -> Cmd Msg
+executeTasks : Task String Value -> Cmd Msg
 executeTasks =
     Task.attempt Continuation
 
 
-update : (Context -> ReadyContext) -> Msg -> Server -> ( Server, Cmd Msg )
+update : (Request -> Response) -> Msg -> () -> ( (), Cmd Msg )
 update handler msg model =
-    case msg of
+    ( model
+    , case msg of
         IncomingRequest request ->
-            case model of
-                NotYetStarted ->
-                    ( model, Cmd.none )
-
-                Running ->
-                    ( model
-                    , { request = request.req
-                      , server = Running
-                      , requestId = request.id
-                      }
-                        |> Internal.Server.Context
-                        |> handler
-                        |> executeTasks
-                    )
+            { request = request.req
+            , requestId = request.id
+            }
+                |> Request
+                |> handler
+                |> executeTasks
 
         RunnerMessage { message } ->
             case message of
                 "SERVED" ->
-                    ( Running, Cmd.none )
+                    Cmd.none
 
                 "CLOSED" ->
-                    ( NotYetStarted, Cmd.none )
+                    Cmd.none
 
                 _ ->
                     Debug.todo ("Handle unknown runner message: " ++ message)
@@ -225,33 +234,65 @@ update handler msg model =
                     -- respond (Response.error err) context
                     Debug.todo "handle the user not handling errors, probably need to pass context around"
 
-                Ok { message, body } ->
-                    case ( model, message ) of
-                        ( _, "CONTINUE" ) ->
-                            ( model, Cmd.none )
-
-                        _ ->
-                            ( model
-                            , runTask "PRINT" (Json.Encode.string ("Handle unknown response: " ++ message))
-                                |> executeTasks
-                            )
+                Ok body ->
+                    Cmd.none
+    )
 
 
-getPath : Context -> Result String String
-getPath (Internal.Server.Context { request }) =
+getPath : Request -> Result String String
+getPath (Request { request }) =
     Json.Decode.decodeValue (Json.Decode.field "url" Json.Decode.string) request
         |> Result.mapError Json.Decode.errorToString
 
 
-matchPath : Context -> Result String (List String)
-matchPath (Internal.Server.Context { request }) =
+matchPath : Request -> Result String (List String)
+matchPath (Request { request }) =
     Json.Decode.decodeValue (Json.Decode.field "url" Json.Decode.string) request
         |> Result.mapError Json.Decode.errorToString
         |> Result.map (String.split "/" >> List.filter (not << String.isEmpty))
 
 
-respond : InternalResponse -> Context -> Task String RunnerResponse
-respond (InternalResponse { status, body, contentType }) (Internal.Server.Context context) =
+getMethod : Request -> Result String Method
+getMethod (Request { request }) =
+    Json.Decode.decodeValue (Json.Decode.field "method" Json.Decode.string) request
+        |> Result.mapError Json.Decode.errorToString
+        |> Result.andThen methodFromString
+
+
+getBody : Request -> Result String String
+getBody (Request { request }) =
+    Json.Decode.decodeValue (Json.Decode.field "elmBody" Json.Decode.string) request
+        |> Result.mapError Json.Decode.errorToString
+
+
+methodFromString : String -> Result String Method
+methodFromString method =
+    case method of
+        "GET" ->
+            Ok Get
+
+        "POST" ->
+            Ok Post
+
+        "PUT" ->
+            Ok Put
+
+        "DELETE" ->
+            Ok Delete
+
+        _ ->
+            Err ("Unknown method: " ++ method)
+
+
+type Method
+    = Get
+    | Post
+    | Put
+    | Delete
+
+
+respond : Request -> InternalResponse -> Response
+respond (Request request) (InternalResponse { status, body, contentType }) =
     [ ( "options"
       , Json.Encode.object
             [ ( "status"
@@ -262,39 +303,54 @@ respond (InternalResponse { status, body, contentType }) (Internal.Server.Contex
             , ( "body"
               , Json.Encode.string body
               )
-            , ( "contentType"
-              , contentType
-                    |> ContentType.toString
-                    |> Json.Encode.string
+            , ( "headers"
+              , [ [ Json.Encode.string "Content-Type"
+                  , contentType
+                        |> ContentType.toString
+                        |> Json.Encode.string
+                  ]
+                ]
+                    |> List.map (Json.Encode.list identity)
+                    |> Json.Encode.list identity
               )
             ]
       )
-    , ( "id", Json.Encode.string context.requestId )
+    , ( "id", Json.Encode.string request.requestId )
     ]
         |> Json.Encode.object
         |> runTask "RESPOND"
 
 
-andThen : (RunnerResponse -> ReadyContext) -> ReadyContext -> ReadyContext
+andThen : (Value -> Response) -> Response -> Response
 andThen =
     Task.andThen
 
 
-map : (RunnerResponse -> RunnerResponse) -> ReadyContext -> ReadyContext
+map : (Value -> Value) -> Response -> Response
 map =
     Task.map
 
 
-mapError : (String -> String) -> ReadyContext -> ReadyContext
+mapError : (String -> String) -> Response -> Response
 mapError =
     Task.mapError
 
 
-onError : (String -> ReadyContext) -> ReadyContext -> ReadyContext
+onError : (String -> Response) -> Response -> Response
 onError =
     Task.onError
 
 
-onSuccess : (RunnerResponse -> ReadyContext) -> ReadyContext -> ReadyContext
+onSuccess : (Value -> Response) -> Response -> Response
 onSuccess =
     Task.andThen
+
+
+resultToResponse : Result String Value -> Response
+resultToResponse result =
+    case result of
+        Ok val ->
+            Task.succeed val
+
+        Err err ->
+            Task.fail err

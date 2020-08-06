@@ -59,8 +59,9 @@ type Error
 
 generateSqlite : Database -> Result Error (Dict String File)
 generateSqlite database =
-    validatePath database.path
-        |> Result.map (\() -> generateTables database.tables)
+    -- validatePath database.path
+    --     |> Result.map (\() -> generateTables database.tables)
+    Err MissingPath
 
 
 validatePath : Path -> Result Error ()
@@ -73,16 +74,16 @@ validatePath path =
             Ok ()
 
 
-generateTables : Dict Name Table -> Result Error (Dict String File)
-generateTables tables =
-    if Dict.isEmpty tables then
-        Err NoTables
 
-    else
-        tables
-            |> Dict.toList
-            |> List.map generateTable
-            |> Dict.fromList
+-- generateTables : Dict Name Table -> Result Error (Dict String File)
+-- generateTables tables =
+--     if Dict.isEmpty tables then
+--         Err NoTables
+--     else
+--         tables
+--             |> Dict.toList
+--             |> List.map generateTable
+--             |> Dict.fromList
 
 
 generateTable : ( Name, Table ) -> Result Error ( String, File )

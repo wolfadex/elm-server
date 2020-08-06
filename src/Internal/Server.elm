@@ -2,10 +2,7 @@ module Internal.Server exposing
     ( Certs
     , Config(..)
     , ConfigData
-    , Context(..)
-    , Request
-    , RunnerResponse
-    , Server(..)
+    , RequestData
     , Type(..)
     , runTask
     )
@@ -18,23 +15,8 @@ import Status exposing (Status(..))
 import Task exposing (Task)
 
 
-type alias RunnerResponse =
-    { message : String
-    , body : Value
-    }
-
-
-type alias Request =
-    Value
-
-
-type Context
-    = Context ContextData
-
-
-type alias ContextData =
-    { request : Request
-    , server : Server
+type alias RequestData =
+    { request : Value
     , requestId : String
     }
 
@@ -62,12 +44,7 @@ type alias Certs =
     }
 
 
-type Server
-    = NotYetStarted
-    | Running
-
-
-runTask : String -> Value -> Task String RunnerResponse
+runTask : String -> Value -> Task String Value
 runTask name value =
     Http.task
         { method = "POST"
@@ -99,7 +76,7 @@ runTask name value =
 
                     Http.GoodStatus_ { statusText } body ->
                         Json.Decode.decodeString Json.Decode.value body
-                            |> Result.map (\bodyJson -> { message = statusText, body = bodyJson })
+                            -- |> Result.map (\bodyJson -> { message = statusText, body = bodyJson })
                             |> Result.mapError Json.Decode.errorToString
             )
                 |> Http.stringResolver
