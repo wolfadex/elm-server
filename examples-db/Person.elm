@@ -38,7 +38,7 @@ create (PartialPerson _ { name, age }) =
         , columnValues = [ Database.Postgres.wrapString name, String.fromInt age ]
         }
             |> Database.Postgres.insertQuery
-            |> Database.Postgres.query
+            |> Server.query
 
 
 get : WhereCondition -> Response
@@ -47,7 +47,7 @@ get where_ =
     , where_ = where_
     }
         |> Database.Postgres.selectQuery
-        |> Database.Postgres.query
+        |> Server.query
         |> Server.andThen (reencode >> Server.resultToResponse)
 
 
@@ -57,7 +57,7 @@ delete id =
     , where_ = Equal "id" (String.fromInt id)
     }
         |> Database.Postgres.deleteQuery
-        |> Database.Postgres.query
+        |> Server.query
 
 
 reencode : Value -> Result String Value

@@ -1,6 +1,6 @@
 module HelloDBServer exposing (main)
 
-import Database.Postgres as Database exposing (WhereCondition(..))
+import Database.Postgres exposing (WhereCondition(..))
 import File
 import Json.Decode
 import Person
@@ -21,7 +21,7 @@ main =
 init : Flags -> Config
 init _ =
     Server.baseConfig
-        |> Database.connect
+        |> Database.Postgres.connect
             { hostname = "localhost"
             , port_ = 5432
             , database = "postgres"

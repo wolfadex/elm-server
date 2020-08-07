@@ -19,6 +19,7 @@ port module Server exposing
     , onError
     , onSuccess
     , program
+    , query
     , respond
     , resultToResponse
     , withPort
@@ -26,11 +27,10 @@ port module Server exposing
 
 import ContentType
 import Internal.Response exposing (InternalResponse(..))
-import Internal.Server exposing (Certs, Config(..), RequestData, Type(..), runTask)
-import Json.Decode exposing (Decoder)
+import Internal.Server exposing (Certs, Config(..), Query, RequestData, Type(..), runTask)
+import Json.Decode
 import Json.Encode exposing (Value)
 import Platform
-import Result.Extra
 import Status
 import Task exposing (Task)
 
@@ -45,14 +45,6 @@ type alias Flags =
     }
 
 
-{-|
-
-    { request = Request -- The actual request object
-    , server = Server -- NotYetStarted | Running
-    , requestId = String -- ID for retrieving the request on the other side
-    }
-
--}
 type Request
     = Request RequestData
 
@@ -89,7 +81,7 @@ withPort port_ (Config config) =
     Config { config | port_ = port_ }
 
 
-envAtPath : List String -> Config -> Config
+envAtPath : Path -> Config -> Config
 envAtPath envPath (Config config) =
     Config { config | envPath = envPath }
 
@@ -127,68 +119,54 @@ program { init, handler } =
                     (Config { port_, type_, databaseConnection }) =
                         init flags
 
-                    finalPort =
-                        Json.Decode.decodeValue (decodeEnv "port" Json.Decode.int) flags.arguments
-                            |> Result.Extra.orElseLazy (\() -> Json.Decode.decodeValue (decodeEnv "PORT" Json.Decode.int) flags.environment)
-                            |> Result.toMaybe
-                            |> Maybe.withDefault port_
+                    initialTasks =
+                        if port_ < 1 || port_ > 65535 then
+                            "Error: Invalid port: "
+                                ++ String.fromInt port_
+                                ++ ", must be between 1 and 65,535."
+                                |> Json.Encode.string
+                                |> runTask "PRINT"
+
+                        else
+                            let
+                                startupConfig =
+                                    Json.Encode.object
+                                        [ ( "port", Json.Encode.int port_ )
+                                        , ( "databaseConnection"
+                                          , case databaseConnection of
+                                                Nothing ->
+                                                    Json.Encode.null
+
+                                                Just connectionData ->
+                                                    Json.Encode.object
+                                                        [ ( "hostname", Json.Encode.string connectionData.hostname )
+                                                        , ( "port", Json.Encode.int connectionData.port_ )
+                                                        , ( "user", Json.Encode.string connectionData.user )
+                                                        , ( "password", Json.Encode.string connectionData.password )
+                                                        , ( "database", Json.Encode.string connectionData.database )
+                                                        ]
+                                          )
+                                        , ( "certs"
+                                          , case type_ of
+                                                Basic ->
+                                                    Json.Encode.null
+
+                                                Secure { certificatePath, keyPath } ->
+                                                    Json.Encode.object
+                                                        [ ( "certificatePath", Json.Encode.string certificatePath )
+                                                        , ( "keyPath", Json.Encode.string keyPath )
+                                                        ]
+                                          )
+                                        ]
+                            in
+                            runTask "SERVE" startupConfig
+                                |> onError (\err -> runTask "PRINT" (Json.Encode.string ("Failed to start server with error: " ++ err)))
+                                |> onSuccess (\_ -> runTask "PRINT" (Json.Encode.string ("Server running on port: " ++ String.fromInt port_)))
                 in
-                if finalPort < 1 || finalPort > 65535 then
-                    ( ()
-                    , "Error: Invalid port: "
-                        ++ String.fromInt finalPort
-                        ++ ", must be between 1 and 65,535."
-                        |> Json.Encode.string
-                        |> runTask "PRINT"
-                        |> executeTasks
-                    )
-
-                else
-                    let
-                        startupConfig =
-                            Json.Encode.object
-                                [ ( "port", Json.Encode.int finalPort )
-                                , ( "databaseConnection"
-                                  , case databaseConnection of
-                                        Nothing ->
-                                            Json.Encode.null
-
-                                        Just connectionData ->
-                                            Json.Encode.object
-                                                [ ( "hostname", Json.Encode.string connectionData.hostname )
-                                                , ( "port", Json.Encode.int connectionData.port_ )
-                                                , ( "user", Json.Encode.string connectionData.user )
-                                                , ( "password", Json.Encode.string connectionData.password )
-                                                , ( "database", Json.Encode.string connectionData.database )
-                                                ]
-                                  )
-                                , ( "certs"
-                                  , case type_ of
-                                        Basic ->
-                                            Json.Encode.null
-
-                                        Secure { certificatePath, keyPath } ->
-                                            Json.Encode.object
-                                                [ ( "certificatePath", Json.Encode.string certificatePath )
-                                                , ( "keyPath", Json.Encode.string keyPath )
-                                                ]
-                                  )
-                                ]
-                    in
-                    ( ()
-                    , runTask "SERVE" startupConfig
-                        |> onError (\err -> runTask "PRINT" (Json.Encode.string ("Failed to start server with error: " ++ err)))
-                        |> onSuccess (\_ -> runTask "PRINT" (Json.Encode.string ("Server running on port: " ++ String.fromInt finalPort)))
-                        |> executeTasks
-                    )
+                ( (), executeTasks initialTasks )
         , subscriptions = subscriptions
         , update = update handler
         }
-
-
-decodeEnv : String -> Decoder a -> Decoder a
-decodeEnv key valDecoder =
-    Json.Decode.field key valDecoder
 
 
 subscriptions : () -> Sub Msg
@@ -205,8 +183,8 @@ executeTasks =
 
 
 update : (Request -> Response) -> Msg -> () -> ( (), Cmd Msg )
-update handler msg model =
-    ( model
+update handler msg () =
+    ( ()
     , case msg of
         IncomingRequest request ->
             { request = request.req
@@ -245,7 +223,7 @@ getPath (Request { request }) =
         |> Result.mapError Json.Decode.errorToString
 
 
-matchPath : Request -> Result String (List String)
+matchPath : Request -> Result String Path
 matchPath (Request { request }) =
     Json.Decode.decodeValue (Json.Decode.field "url" Json.Decode.string) request
         |> Result.mapError Json.Decode.errorToString
@@ -354,3 +332,8 @@ resultToResponse result =
 
         Err err ->
             Task.fail err
+
+
+query : Query -> Task String Value
+query =
+    Internal.Server.query

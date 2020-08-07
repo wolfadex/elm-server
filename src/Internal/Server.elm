@@ -2,13 +2,14 @@ module Internal.Server exposing
     ( Certs
     , Config(..)
     , ConfigData
+    , Query(..)
     , RequestData
     , Type(..)
+    , query
     , runTask
     )
 
 import Http
-import Internal.Database exposing (DatabaseConnection)
 import Json.Decode
 import Json.Encode exposing (Value)
 import Status exposing (Status(..))
@@ -30,6 +31,15 @@ type alias ConfigData =
     , type_ : Type
     , databaseConnection : Maybe DatabaseConnection
     , envPath : List String
+    }
+
+
+type alias DatabaseConnection =
+    { hostname : String
+    , port_ : Int
+    , user : String
+    , password : String
+    , database : String
     }
 
 
@@ -74,10 +84,20 @@ runTask name value =
                     Http.BadStatus_ _ body ->
                         Err body
 
-                    Http.GoodStatus_ { statusText } body ->
+                    Http.GoodStatus_ _ body ->
                         Json.Decode.decodeString Json.Decode.value body
-                            -- |> Result.map (\bodyJson -> { message = statusText, body = bodyJson })
                             |> Result.mapError Json.Decode.errorToString
             )
                 |> Http.stringResolver
         }
+
+
+type Query
+    = Query String
+
+
+query : Query -> Task String Value
+query (Query qry) =
+    qry
+        |> Json.Encode.string
+        |> runTask "DATABASE_QUERY"
