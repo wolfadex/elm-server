@@ -59,7 +59,7 @@ runTask name value =
     Http.task
         { method = "POST"
         , headers = []
-        , url = "/runner"
+        , url = "internal:/runner"
         , body =
             [ ( "msg", Json.Encode.string name )
             , ( "args", value )

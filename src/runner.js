@@ -12,6 +12,7 @@ const requests = {};
 let elmServer = null;
 let serverInstance = null;
 let databaseConnectionPool = null;
+let defaultXhr = null;
 
 async function main() {
   switch (Deno.args[0]) {
@@ -88,6 +89,7 @@ async function buildModule(jsFileName, commandLineArgs) {
 
   // Add our mock XMLHttpRequest class into the global namespace
   // so that Elm code will use it
+  defaultXhr = globalThis["XMLHttpRequest"];
   globalThis["XMLHttpRequest"] = XMLHttpRequest;
 
   // Run Elm code to create the 'Elm' object
@@ -192,7 +194,11 @@ class XMLHttpRequest {
   }
 
   open(method, url, performAsync) {
-    return;
+    if (url === "internal:/runner") {
+      return;
+    } else {
+      defaultXhr.open(method, url, performAsync);
+    }
   }
 
   addEventListener(name, callback) {
@@ -213,6 +219,7 @@ class XMLHttpRequest {
       xhr.response = JSON.stringify(body);
       xhr._callback();
     }
+    console.log(request);
     request = JSON.parse(request);
     switch (request.msg) {
       case "SERVE":

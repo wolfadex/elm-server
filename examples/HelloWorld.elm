@@ -23,11 +23,11 @@ init _ =
 handler : Request -> Response
 handler request =
     case Server.matchPath request of
-        Result.Ok [] ->
+        Ok [] ->
             Server.respond request (Response.default |> Response.setBody indexPage)
                 |> Server.andThen (\_ -> Log.toConsole "index page requested")
 
-        Result.Ok [ "hello", name ] ->
+        Ok [ "hello", name ] ->
             Log.toConsole ("Saying hello to " ++ name)
                 |> Server.andThen
                     (\_ ->
@@ -36,7 +36,7 @@ handler request =
                             |> Server.respond request
                     )
 
-        Result.Ok _ ->
+        Ok _ ->
             Server.respond request Response.notFound
 
         Err err ->
