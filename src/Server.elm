@@ -26,13 +26,15 @@ port module Server exposing
     )
 
 import ContentType
+import Error exposing (Error(..))
 import Internal.Response exposing (InternalResponse(..))
 import Internal.Server exposing (Certs, Config(..), Query, RequestData, Type(..), runTask)
 import Json.Decode
 import Json.Encode exposing (Value)
 import Platform
+import Response
 import Status
-import Task exposing (Task)
+import Task exposing (Task, onError)
 
 
 type alias Program =
@@ -50,7 +52,7 @@ type Request
 
 
 type alias Response =
-    Task String Value
+    Task Error Value
 
 
 type alias Config =
@@ -87,27 +89,11 @@ envAtPath envPath (Config config) =
 
 
 type Msg
-    = IncomingRequest IncomingRequestData
-    | RunnerMessage RunnerMsg
-    | Continuation (Result String Value)
+    = IncomingRequest Value
+    | Continuation (Result Error Value)
 
 
-type alias IncomingRequestData =
-    { req : Value
-    , id : String
-    }
-
-
-type alias RunnerMsg =
-    { message : String
-    , value : Value
-    }
-
-
-port requestPort : (IncomingRequestData -> msg) -> Sub msg
-
-
-port runnerMsg : (RunnerMsg -> msg) -> Sub msg
+port requestPort : (Value -> msg) -> Sub msg
 
 
 program : { init : Flags -> Config, handler : Request -> Response } -> Program
@@ -160,8 +146,6 @@ program { init, handler } =
                                         ]
                             in
                             runTask "SERVE" startupConfig
-                                |> onError (\err -> runTask "PRINT" (Json.Encode.string ("Failed to start server with error: " ++ err)))
-                                |> onSuccess (\_ -> runTask "PRINT" (Json.Encode.string ("Server running on port: " ++ String.fromInt port_)))
                 in
                 ( (), executeTasks initialTasks )
         , subscriptions = subscriptions
@@ -171,13 +155,10 @@ program { init, handler } =
 
 subscriptions : () -> Sub Msg
 subscriptions () =
-    Sub.batch
-        [ requestPort IncomingRequest
-        , runnerMsg RunnerMessage
-        ]
+    requestPort IncomingRequest
 
 
-executeTasks : Task String Value -> Cmd Msg
+executeTasks : Task Error Value -> Cmd Msg
 executeTasks =
     Task.attempt Continuation
 
@@ -187,63 +168,56 @@ update handler msg () =
     ( ()
     , case msg of
         IncomingRequest request ->
-            { request = request.req
-            , requestId = request.id
-            }
+            request
                 |> Request
                 |> handler
+                |> onError (Error.toString >> Response.error >> respond (Request request))
                 |> executeTasks
-
-        RunnerMessage { message } ->
-            case message of
-                "SERVED" ->
-                    Cmd.none
-
-                "CLOSED" ->
-                    Cmd.none
-
-                _ ->
-                    Debug.todo ("Handle unknown runner message: " ++ message)
 
         Continuation result ->
             case result of
                 Err err ->
                     -- This happens when the user doesn't handle `Server.onError`
                     -- respond (Response.error err) context
-                    Debug.todo "handle the user not handling errors, probably need to pass context around"
+                    err
+                        |> Error.toString
+                        |> Json.Encode.string
+                        |> runTask "PRINT"
+                        |> executeTasks
 
-                Ok body ->
+                Ok _ ->
+                    -- Should something happen here?
                     Cmd.none
     )
 
 
-getPath : Request -> Result String String
-getPath (Request { request }) =
+getPath : Request -> Result Error String
+getPath (Request request) =
     Json.Decode.decodeValue (Json.Decode.field "url" Json.Decode.string) request
-        |> Result.mapError Json.Decode.errorToString
+        |> Result.mapError TypeError
 
 
-matchPath : Request -> Result String Path
-matchPath (Request { request }) =
+matchPath : Request -> Result Error Path
+matchPath (Request request) =
     Json.Decode.decodeValue (Json.Decode.field "url" Json.Decode.string) request
-        |> Result.mapError Json.Decode.errorToString
+        |> Result.mapError TypeError
         |> Result.map (String.split "/" >> List.filter (not << String.isEmpty))
 
 
-getMethod : Request -> Result String Method
-getMethod (Request { request }) =
+getMethod : Request -> Result Error Method
+getMethod (Request request) =
     Json.Decode.decodeValue (Json.Decode.field "method" Json.Decode.string) request
-        |> Result.mapError Json.Decode.errorToString
+        |> Result.mapError TypeError
         |> Result.andThen methodFromString
 
 
-getBody : Request -> Result String String
-getBody (Request { request }) =
+getBody : Request -> Result Error String
+getBody (Request request) =
     Json.Decode.decodeValue (Json.Decode.field "elmBody" Json.Decode.string) request
-        |> Result.mapError Json.Decode.errorToString
+        |> Result.mapError TypeError
 
 
-methodFromString : String -> Result String Method
+methodFromString : String -> Result Error Method
 methodFromString method =
     case method of
         "GET" ->
@@ -259,7 +233,7 @@ methodFromString method =
             Ok Delete
 
         _ ->
-            Err ("Unknown method: " ++ method)
+            Err (RuntimeError ("Unknown method: " ++ method))
 
 
 type Method
@@ -293,7 +267,7 @@ respond (Request request) (InternalResponse { status, body, contentType }) =
               )
             ]
       )
-    , ( "id", Json.Encode.string request.requestId )
+    , ( "request", request )
     ]
         |> Json.Encode.object
         |> runTask "RESPOND"
@@ -309,12 +283,12 @@ map =
     Task.map
 
 
-mapError : (String -> String) -> Response -> Response
+mapError : (Error -> Error) -> Response -> Response
 mapError =
     Task.mapError
 
 
-onError : (String -> Response) -> Response -> Response
+onError : (Error -> Response) -> Response -> Response
 onError =
     Task.onError
 
@@ -331,9 +305,9 @@ resultToResponse result =
             Task.succeed val
 
         Err err ->
-            Task.fail err
+            Task.fail (RuntimeError err)
 
 
-query : Query -> Task String Value
+query : Query -> Task Error Value
 query =
     Internal.Server.query

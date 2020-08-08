@@ -1,39 +1,148 @@
 import * as denoHttp from "https://deno.land/std@0.60.0/http/server.ts";
 import * as path from "https://deno.land/std@0.60.0/path/mod.ts";
 import { parse as parseFlags } from "https://deno.land/std@0.60.0/flags/mod.ts";
-import { v4 as uuid } from "https://deno.land/std@0.60.0/uuid/mod.ts";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
 import { Pool } from "https://deno.land/x/postgres@v0.4.0/mod.ts";
 
 config({ safe: true });
 
 const tempDirectoriesToRemove = [];
-const requests = {};
 let elmServer = null;
 let serverInstance = null;
 let databaseConnectionPool = null;
-let defaultXhr = null;
+const _setTimeout = globalThis.setTimeout;
+const __elm_interop_tasks = new Map();
+let __elm_interop_nextTask = null;
 
-async function main() {
-  switch (Deno.args[0]) {
-    case "start":
-      {
-        const [compiledElm, commnadLineArgs] = await compileElm();
-        const [module, flags] = await buildModule(compiledElm, commnadLineArgs);
-        runCompiledServer(module, flags);
-      }
-      break;
-    case "--help":
-      showHelp();
-      break;
-    default:
-      console.log(
-        `Run 'elm-server --help' for a list of commands or visit main.website.com`
-      );
-      exit(1);
-      break;
+Object.defineProperty(Object.prototype, "__elm_interop_async", {
+  set([token, msg, args]) {
+    // Async version see setTimeout below for execution
+    __elm_interop_nextTask = [token, msg, args];
+  },
+  get() {
+    let ret = __elm_interop_tasks.get(this.token);
+    __elm_interop_tasks.delete(ret);
+    return ret;
+  },
+});
+
+globalThis.setTimeout = (callback, time, ...args) => {
+  // 69 108 109 === Elm
+  if (time === -69108109 && __elm_interop_nextTask != null) {
+    const [token, msg, args] = __elm_interop_nextTask;
+    __elm_interop_nextTask = null;
+
+    Promise.resolve()
+      .then(async (_) => {
+        switch (msg) {
+          case "SERVE":
+            {
+              const { databaseConnection, port, certs } = args;
+              const options = { port };
+
+              if (certs != null) {
+                serverInstance = denoHttp.serveTLS({
+                  ...options,
+                  certFile: certs.certificatePath,
+                  keyFile: certs.keyPath,
+                });
+              } else {
+                serverInstance = denoHttp.serve(options);
+              }
+
+              if (databaseConnection != null) {
+                const POOL_CONNECTIONS = 20;
+                const {
+                  hostname,
+                  port,
+                  user,
+                  password,
+                  database,
+                } = databaseConnection;
+                databaseConnectionPool = new Pool(
+                  {
+                    user,
+                    password,
+                    port,
+                    hostname,
+                    database,
+                  },
+                  POOL_CONNECTIONS
+                );
+              }
+
+              console.log("Server running on port:", port);
+
+              for await (const req of serverInstance) {
+                if (elmServer == null) {
+                  console.error(
+                    "Somehow started the server but lost the elm app runtime."
+                  );
+                  exit(1);
+                } else {
+                  const decoder = new TextDecoder();
+                  const decodedBody = decoder.decode(
+                    await Deno.readAll(req.body)
+                  );
+                  req.elmBody = decodedBody;
+                  elmServer.ports.requestPort.send(req);
+                }
+              }
+
+              console.log("Server shutdown");
+            }
+            break;
+          case "RESPOND":
+            {
+              const { headers, ...restOptions } = args.options;
+              const actualHeaders = new Headers();
+
+              headers.forEach(function ([key, val]) {
+                actualHeaders.set(key, val);
+              });
+              args.request.respond({
+                ...restOptions,
+                headers: actualHeaders,
+              });
+            }
+            break;
+          case "CLOSE":
+            serverInstance.close();
+            break;
+          case "PRINT":
+            console.log(args);
+            break;
+          case "DATABASE_QUERY": {
+            const client = await databaseConnectionPool.connect();
+            const result = await client.query(args);
+
+            client.release();
+
+            return result.rows;
+          }
+          case "FILE_SYSTEM_READ": {
+            const decoder = new TextDecoder("utf-8");
+            const fileContent = decoder.decode(await Deno.readFile(args));
+
+            return fileContent;
+          }
+          default:
+            console.error(`Error: Unknown server request: "${msg}"`, args);
+        }
+      })
+      .then((result) => {
+        __elm_interop_tasks.set(token, { tag: "Ok", result });
+      })
+      .catch((err) => {
+        __elm_interop_tasks.set(token, { tag: "Error", error: err });
+      })
+      .then((_) => {
+        callback();
+      });
+  } else {
+    return _setTimeout(callback, time, ...args);
   }
-}
+};
 
 function showHelp() {
   console.log(`elm-server commands and options
@@ -86,11 +195,6 @@ async function buildModule(jsFileName, commandLineArgs) {
   // Read compiled JS from file
   const jsData = Deno.readFileSync(jsFileName);
   const jsText = new TextDecoder("utf-8").decode(jsData);
-
-  // Add our mock XMLHttpRequest class into the global namespace
-  // so that Elm code will use it
-  defaultXhr = globalThis["XMLHttpRequest"];
-  globalThis["XMLHttpRequest"] = XMLHttpRequest;
 
   // Run Elm code to create the 'Elm' object
   const globalEval = eval;
@@ -176,184 +280,27 @@ function findNestedModule(obj) {
 
 function runCompiledServer(module, flags) {
   // Start Elm program
-  // console.log("Debug", flags.environment);
   elmServer = module.init({ flags });
 }
 
-class XMLHttpRequest {
-  constructor() {
-    this.responseUrl = "/runner";
-  }
-
-  getAllResponseHeaders() {
-    return "";
-  }
-
-  setRequestHeader(name, value) {
-    return;
-  }
-
-  open(method, url, performAsync) {
-    if (url === "internal:/runner") {
-      return;
-    } else {
-      defaultXhr.open(method, url, performAsync);
-    }
-  }
-
-  addEventListener(name, callback) {
-    if (name == "load") {
-      this._callback = callback;
-    }
-  }
-
-  async send(request) {
-    let xhr = this;
-    function handleResponse({
-      status = 200,
-      body = "",
-      statusText = "CONTINUE",
-    } = {}) {
-      xhr.status = status;
-      xhr.statusText = statusText;
-      xhr.response = JSON.stringify(body);
-      xhr._callback();
-    }
-    console.log(request);
-    request = JSON.parse(request);
-    switch (request.msg) {
-      case "SERVE":
-        {
-          const { databaseConnection, port, certs } = request.args;
-          const options = { port };
-
-          if (certs != null) {
-            serverInstance = denoHttp.serveTLS({
-              ...options,
-              certFile: certs.certificatePath,
-              keyFile: certs.keyPath,
-            });
-          } else {
-            serverInstance = denoHttp.serve(options);
-          }
-
-          if (databaseConnection != null) {
-            const POOL_CONNECTIONS = 20;
-            const {
-              hostname,
-              port,
-              user,
-              password,
-              database,
-            } = databaseConnection;
-            databaseConnectionPool = new Pool(
-              {
-                user,
-                password,
-                port,
-                hostname,
-                database,
-              },
-              POOL_CONNECTIONS
-            );
-          }
-
-          setTimeout(function () {
-            elmServer.ports.runnerMsg.send({ message: "SERVED", value: null });
-            handleResponse();
-          });
-
-          for await (const req of serverInstance) {
-            if (elmServer == null) {
-              console.error(
-                "Somehow started the server but lost the elm app runtime."
-              );
-              exit(1);
-            } else {
-              const nextId = uuid.generate();
-              const decoder = new TextDecoder();
-              const decodedBody = decoder.decode(await Deno.readAll(req.body));
-              req.elmBody = decodedBody;
-              requests[nextId] = req;
-              elmServer.ports.requestPort.send({ req, id: nextId });
-            }
-          }
-        }
-        break;
-      case "RESPOND":
-        {
-          console.log("requests", request.args.id);
-          const req = requests[request.args.id];
-          if (req != null) {
-            const { headers, ...restOptions } = request.args.options;
-            const actualHeaders = new Headers();
-
-            headers.forEach(function ([key, val]) {
-              actualHeaders.set(key, val);
-            });
-
-            req.respond({ ...restOptions, headers: actualHeaders });
-            delete requests[request.args.id];
-            handleResponse();
-          } else {
-            handleResponse();
-          }
-        }
-        break;
-      case "CLOSE":
-        {
-          serverInstance.close();
-          elmServer.ports.runnerMsg.send({ message: "CLOSED", value: null });
-          handleResponse();
-        }
-        break;
-      case "PRINT":
-        console.log(request.args);
-        handleResponse();
-        break;
-      case "DATABASE_QUERY":
-        {
-          try {
-            const client = await databaseConnectionPool.connect();
-            const result = await client.query(request.args);
-
-            client.release();
-            handleResponse({
-              body: result.rows,
-            });
-          } catch (err) {
-            console.log("query error", err);
-            handleResponse({
-              status: 500,
-              body: err,
-            });
-          }
-        }
-        break;
-      case "FILE_SYSTEM_READ":
-        {
-          try {
-            const decoder = new TextDecoder("utf-8");
-            const fileContent = decoder.decode(
-              await Deno.readFile(request.args)
-            );
-            handleResponse({
-              body: fileContent,
-            });
-          } catch (error) {
-            handleResponse({
-              body: error,
-              status: 500,
-            });
-          }
-        }
-        break;
-      default:
-        console.error(
-          `Error: Unknown server request: "${request.msg}"`,
-          request.args
-        );
-    }
+async function main() {
+  switch (Deno.args[0]) {
+    case "start":
+      {
+        const [compiledElm, commnadLineArgs] = await compileElm();
+        const [module, flags] = await buildModule(compiledElm, commnadLineArgs);
+        runCompiledServer(module, flags);
+      }
+      break;
+    case "--help":
+      showHelp();
+      break;
+    default:
+      console.log(
+        `Run 'elm-server --help' for a list of commands or visit main.website.com`
+      );
+      exit(1);
+      break;
   }
 }
 

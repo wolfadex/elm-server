@@ -5,11 +5,8 @@ import Element exposing (..)
 import Element.Font as Font
 import Element.Input as Input
 import Http exposing (Error(..), Response(..))
-import Internal.Server exposing (Request)
-import Json.Decode exposing (Decoder)
-import Json.Encode exposing (Value)
+import Json.Encode
 import Person exposing (Person)
-import Task
 
 
 main : Program () Model Msg

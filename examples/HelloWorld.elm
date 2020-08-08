@@ -1,5 +1,6 @@
 module HelloWorld exposing (main)
 
+import Error
 import Html.String as Html
 import Html.String.Attributes as Attr
 import Logger as Log
@@ -40,7 +41,7 @@ handler request =
             Server.respond request Response.notFound
 
         Err err ->
-            Server.respond request (Response.error err)
+            Server.respond request (Response.error (Error.toString err))
 
 
 indexPage : String
