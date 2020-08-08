@@ -1,4 +1,4 @@
 .DS_Store
 
 elm-stuff
-exmaples/*.html
+exmaples/**/*.html
