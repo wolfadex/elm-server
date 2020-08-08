@@ -9,6 +9,7 @@ Loosely based off of [ianmackenzie/elm-script](https://github.com/ianmackenzie/e
 ```Elm
 module HelloWorld exposing (main)
 
+import Error
 import Logger as Log
 import Response
 import Server exposing (Config, Flags, Request, Response)
@@ -30,11 +31,11 @@ init _ =
 handler : Request -> Response
 handler request =
     case Server.matchPath request of
-        Result.Ok [] ->
+        Ok [] ->
             Server.respond request (Response.default |> Response.setBody "Hello, Elm Server!")
                 |> Server.andThen (\_ -> Log.toConsole "index page requested")
 
-        Result.Ok [ "hello", name ] ->
+        Ok [ "hello", name ] ->
             Log.toConsole ("Saying hello to " ++ name)
                 |> Server.andThen
                     (\_ ->
@@ -43,24 +44,24 @@ handler request =
                             |> Server.respond request
                     )
 
-        Result.Ok _ ->
+        Ok _ ->
             Server.respond request Response.notFound
 
         Err err ->
-            Server.respond request (Response.error err)
+            Server.respond request (Response.error (Error.toString err))
 ```
 
 ## Other Examples:
 
 - [Hello World](./examples/HelloWorld.elm)
-    - Your most basic examples
+  - Your most basic examples
 - [HTTPS](./examples/SecureWorld.elm) (You'll need to create your own certs if you want to try this one out.)
-    - Extension of Hello World to show HTTPS
+  - Extension of Hello World to show HTTPS
 - [Load a file](./examples/HelloFile.elm), pairs with [HelloClient.elm](./examples/HelloClient.elm)
-    - Shows loading a file from a local directory and returning the contents to the user
+  - Shows loading a file from a local directory and returning the contents to the user
 - [Database (Postgres)](./examples/HelloDBServer.elm), pairs with [Person.elm](./examples-db/Person.elm) and [HelloDBClient.elm](./examples/HelloDBClient.elm)
-    - A simple client and server written in Elm. Only supports basic GET, POST, DELETE
-    - Shows off sharing code between front and back end
+  - A simple client and server written in Elm. Only supports basic GET, POST, DELETE
+  - Shows off sharing code between front and back end
 
 All examples (listed and otherwise) can be found in [examples](./examples).
 
@@ -69,9 +70,9 @@ All examples (listed and otherwise) can be found in [examples](./examples).
 1. clone this repo
 1. install [Deno](https://deno.land/)
 1. from the cloned repo run `./build.sh`
-    - this compiles the js glue code which creates a command called `elm-server`
+   - this compiles the js glue code which creates a command called `elm-server`
 1. run `elm-server start path/to/YourServer.elm`
-    - this starts your server
+   - this starts your server
 
 ## Docs:
 
