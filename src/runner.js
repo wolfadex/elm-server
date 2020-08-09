@@ -3,6 +3,11 @@ import * as path from "https://deno.land/std@0.60.0/path/mod.ts";
 import { parse as parseFlags } from "https://deno.land/std@0.60.0/flags/mod.ts";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
 import { Pool } from "https://deno.land/x/postgres@v0.4.0/mod.ts";
+import { validateJwt } from "https://deno.land/x/djwt@v1.2/validate.ts";
+import {
+  makeJwt,
+  setExpiration,
+} from "https://deno.land/x/djwt@v1.2/create.ts";
 
 config({ safe: true });
 
@@ -126,6 +131,16 @@ globalThis.setTimeout = (callback, time, ...args) => {
 
             return fileContent;
           }
+          case "JWT_GENERATE":
+            return makeJwt({
+              ...args,
+              payload: {
+                ...args.payload,
+                exp: setExpiration(args.payload.exp),
+              },
+            });
+          case "JWT_VALIDATE":
+            return validateJwt(args);
           default:
             console.error(`Error: Unknown server request: "${msg}"`, args);
         }

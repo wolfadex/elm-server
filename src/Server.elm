@@ -12,10 +12,10 @@ port module Server exposing
     , getBody
     , getMethod
     , getPath
+    , getQueryParams
     , makeSecure
     , map
     , mapError
-    , matchPath
     , onError
     , onSuccess
     , program
@@ -27,12 +27,14 @@ port module Server exposing
 
 import ContentType
 import Error exposing (Error(..))
+import Html.Attributes exposing (value)
 import Internal.Response exposing (InternalResponse(..))
-import Internal.Server exposing (Certs, Config(..), Query, RequestData, Type(..), runTask)
+import Internal.Server exposing (Certs, Config(..), Query, Type(..), runTask)
 import Json.Decode
 import Json.Encode exposing (Value)
 import Platform
 import Response
+import Result.Extra
 import Status
 import Task exposing (Task, onError)
 
@@ -48,7 +50,44 @@ type alias Flags =
 
 
 type Request
-    = Request RequestData
+    = Request InternalRequest
+
+
+type alias InternalRequest =
+    { body : Value
+    , path : Path
+    , method : Method
+    , queryParams : List QueryParam
+    , actualRequest : Value
+    }
+
+
+type alias QueryParam =
+    ( String, Maybe String )
+
+
+getBody : Request -> Value
+getBody (Request { body }) =
+    body
+
+
+getPath : Request -> Path
+getPath (Request { path }) =
+    path
+
+
+getMethod : Request -> Method
+getMethod (Request { method }) =
+    method
+
+
+getQueryParams : Request -> List QueryParam
+getQueryParams (Request { queryParams }) =
+    queryParams
+
+
+type alias IncomingRequest =
+    Value
 
 
 type alias Response =
@@ -169,9 +208,22 @@ update handler msg () =
     , case msg of
         IncomingRequest request ->
             request
-                |> Request
-                |> handler
-                |> onError (Error.toString >> Response.error >> respond (Request request))
+                |> parseRequest
+                |> Result.mapError
+                    (Error.toString
+                        >> Response.error
+                        >> respond
+                            (Request
+                                { body = Json.Encode.null
+                                , path = []
+                                , method = Get
+                                , queryParams = []
+                                , actualRequest = request
+                                }
+                            )
+                    )
+                |> Result.map handler
+                |> Result.Extra.merge
                 |> executeTasks
 
         Continuation result ->
@@ -191,49 +243,121 @@ update handler msg () =
     )
 
 
-getPath : Request -> Result Error String
-getPath (Request request) =
+parseRequest : IncomingRequest -> Result Error Request
+parseRequest request =
+    parsePath request
+        |> Result.andThen
+            (\( path, queryParams ) ->
+                parseMethod request
+                    |> Result.andThen
+                        (\method ->
+                            parseBody request
+                                |> Result.map
+                                    (\body ->
+                                        Request
+                                            { body = body
+                                            , path = path
+                                            , method = method
+                                            , queryParams = queryParams
+                                            , actualRequest = request
+                                            }
+                                    )
+                        )
+            )
+
+
+parsePath : IncomingRequest -> Result Error ( Path, List QueryParam )
+parsePath request =
     Json.Decode.decodeValue (Json.Decode.field "url" Json.Decode.string) request
         |> Result.mapError TypeError
+        |> Result.andThen
+            (\pathStr ->
+                case String.split "?" pathStr of
+                    [ pathOnly ] ->
+                        Ok
+                            ( buildPath pathOnly
+                            , []
+                            )
+
+                    [ path, paramsStr ] ->
+                        Ok
+                            ( buildPath path
+                            , paramsStr
+                                |> String.split "&"
+                                |> List.map buildQueryParam
+                            )
+
+                    _ ->
+                        Err (RuntimeError "Malformed request url")
+            )
 
 
-matchPath : Request -> Result Error Path
-matchPath (Request request) =
-    Json.Decode.decodeValue (Json.Decode.field "url" Json.Decode.string) request
-        |> Result.mapError TypeError
-        |> Result.map (String.split "/" >> List.filter (not << String.isEmpty))
+buildPath : String -> Path
+buildPath =
+    String.split "/" >> List.filter (not << String.isEmpty)
 
 
-getMethod : Request -> Result Error Method
-getMethod (Request request) =
+buildQueryParam : String -> QueryParam
+buildQueryParam str =
+    case String.split "=" str of
+        [ key, value ] ->
+            ( key, Just value )
+
+        [ key ] ->
+            ( key, Nothing )
+
+        _ ->
+            ( str, Nothing )
+
+
+parseMethod : IncomingRequest -> Result Error Method
+parseMethod request =
     Json.Decode.decodeValue (Json.Decode.field "method" Json.Decode.string) request
         |> Result.mapError TypeError
-        |> Result.andThen methodFromString
+        |> Result.map methodFromString
 
 
-getBody : Request -> Result Error String
-getBody (Request request) =
-    Json.Decode.decodeValue (Json.Decode.field "elmBody" Json.Decode.string) request
+parseBody : IncomingRequest -> Result Error Value
+parseBody request =
+    Json.Decode.decodeValue (Json.Decode.field "elmBody" Json.Decode.value) request
         |> Result.mapError TypeError
 
 
-methodFromString : String -> Result Error Method
+methodFromString : String -> Method
 methodFromString method =
     case method of
         "GET" ->
-            Ok Get
+            Get
 
         "POST" ->
-            Ok Post
+            Post
 
         "PUT" ->
-            Ok Put
+            Put
 
         "DELETE" ->
-            Ok Delete
+            Delete
+
+        "OPTION" ->
+            Option
+
+        "HEAD" ->
+            Head
+
+        "CONNECT" ->
+            Connect
+
+        "OPTIONS" ->
+            Options
+
+        "TRACE" ->
+            Trace
+
+        "PATCH" ->
+            Patch
 
         _ ->
-            Err (RuntimeError ("Unknown method: " ++ method))
+            Unofficial method
 
 
 type Method
@@ -241,6 +365,13 @@ type Method
     | Post
     | Put
     | Delete
+    | Option
+    | Head
+    | Connect
+    | Options
+    | Trace
+    | Patch
+    | Unofficial String
 
 
 respond : Request -> InternalResponse -> Response
@@ -267,7 +398,7 @@ respond (Request request) (InternalResponse { status, body, contentType }) =
               )
             ]
       )
-    , ( "request", request )
+    , ( "request", request.actualRequest )
     ]
         |> Json.Encode.object
         |> runTask "RESPOND"
