@@ -3,7 +3,6 @@ module Internal.Server exposing
     , Config(..)
     , ConfigData
     , Query(..)
-    , RequestData
     , Type(..)
     , query
     , runTask
@@ -14,10 +13,6 @@ import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
 import Process
 import Task exposing (Task)
-
-
-type alias RequestData =
-    Value
 
 
 type Config
@@ -54,36 +49,6 @@ type alias Certs =
 
 runTask : String -> Value -> Task Error Value
 runTask message args =
-    -- Http.task
-    --     { method = "POST"
-    --     , headers = []
-    --     , url = "internal:/runner"
-    --     , body =
-    --         [ ( "msg", Json.Encode.string name )
-    --         , ( "args", value )
-    --         ]
-    --             |> Json.Encode.object
-    --             |> Http.jsonBody
-    --     , timeout = Nothing
-    --     , resolver =
-    --         (\response ->
-    --             case response of
-    --                 Http.BadUrl_ url ->
-    --                     "Javscript Error: Bad Url: "
-    --                         ++ url
-    --                         |> Err
-    --                 Http.Timeout_ ->
-    --                     Err "Javascript took too long to respond"
-    --                 Http.NetworkError_ ->
-    --                     Err "Unknown javascript error resulted in a 'Network Error'"
-    --                 Http.BadStatus_ _ body ->
-    --                     Err body
-    --                 Http.GoodStatus_ _ body ->
-    --                     Json.Decode.decodeString Json.Decode.value body
-    --                         |> Result.mapError Json.Decode.errorToString
-    --         )
-    --             |> Http.stringResolver
-    --     }
     evalAsync message args Json.Decode.value
 
 
@@ -96,14 +61,6 @@ query (Query qry) =
     qry
         |> Json.Encode.string
         |> runTask "DATABASE_QUERY"
-
-
-type alias Interop =
-    Value
-
-
-type alias Code =
-    String
 
 
 
