@@ -23,25 +23,51 @@ init _ =
 
 handler : Request -> Response
 handler request =
-    case Server.matchPath request of
-        Ok [] ->
-            Server.respond request (Response.default |> Response.setBody indexPage)
+    case Server.getPath request of
+        [] ->
+            Response.ok
+                |> Response.setBody indexPage
+                |> Server.respond request
                 |> Server.andThen (\_ -> Log.toConsole "index page requested")
 
-        Ok [ "hello", name ] ->
-            Log.toConsole ("Saying hello to " ++ name)
-                |> Server.andThen
-                    (\_ ->
-                        Response.default
-                            |> Response.setBody ("Hello, " ++ name ++ "!")
-                            |> Server.respond request
-                    )
+        [ "hello" ] ->
+            let
+                maybeName =
+                    Server.getQueryParams request
+                        |> listFind (\( key, _ ) -> key == "name")
+            in
+            case maybeName of
+                Just ( _, Just name ) ->
+                    Log.toConsole ("Saying hello to " ++ name)
+                        |> Server.andThen
+                            (\_ ->
+                                Response.ok
+                                    |> Response.setBody ("Hello, " ++ name ++ "!")
+                                    |> Server.respond request
+                            )
 
-        Ok _ ->
-            Server.respond request Response.notFound
+                _ ->
+                    Response.ok
+                        |> Response.setBody "What is your name?"
+                        |> Server.respond request
 
-        Err err ->
-            Server.respond request (Response.error (Error.toString err))
+        _ ->
+            Response.notFound
+                |> Server.respond request
+
+
+listFind : (a -> Bool) -> List a -> Maybe a
+listFind predicate list =
+    case list of
+        [] ->
+            Nothing
+
+        next :: rest ->
+            if predicate next then
+                Just next
+
+            else
+                listFind predicate rest
 
 
 indexPage : String
@@ -55,7 +81,7 @@ indexPage =
                 [ Attr.href "" ]
                 [ Html.text "Home" ]
             , Html.a
-                [ Attr.href "hello/carl" ]
+                [ Attr.href "hello?name=carl" ]
                 [ Html.text "Say Hello" ]
             ]
         ]

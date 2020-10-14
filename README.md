@@ -2,7 +2,7 @@ This was a fun experiment, and I learned a lot from it, especially a lot about [
 
 In the end though, working inside the sandbox of a JS environment for a server just seems wrong. Most notably I found it interesting that Deno is a layer on top of Rust, with a huge influence from Go. Both of those languages are purpose built for back end work, more specifically Go is written for building servers. Deno (aka Javascript) doesn't have the performance benefits of Go or Rust (per the Deno devs), nor does it have what I would consider to be the better ergonomics of either. This isn't to say "don't use Deno". I've been very happy in my use of it in-place of where I hace typically used Node. I would say though that Elm on the back end would most definitely benefit from, as Evan has said before, not compiling to JS. (I can't speak to compiling to C, BEAM, or anything else as I don't know anything about compiling to those.)
 
-----
+---
 
 # elm-server
 
@@ -36,25 +36,24 @@ init _ =
 
 handler : Request -> Response
 handler request =
-    case Server.matchPath request of
-        Ok [] ->
-            Server.respond request (Response.default |> Response.setBody "Hello, Elm Server!")
+    case Server.getPath request of
+        [] ->
+            Response.ok
+                |> Response.setBody "Hello, Elm Server!"
+                |> Server.respond request
                 |> Server.andThen (\_ -> Log.toConsole "index page requested")
 
-        Ok [ "hello", name ] ->
+        [ "hello", name ] ->
             Log.toConsole ("Saying hello to " ++ name)
                 |> Server.andThen
                     (\_ ->
-                        Response.default
+                        Response.ok
                             |> Response.setBody ("Hello, " ++ name ++ "!")
                             |> Server.respond request
                     )
 
-        Ok _ ->
+        _ ->
             Server.respond request Response.notFound
-
-        Err err ->
-            Server.respond request (Response.error (Error.toString err))
 ```
 
 ## Other Examples:

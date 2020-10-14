@@ -1,12 +1,12 @@
 module Response exposing
     ( Header
     , Response
-    , default
     , error
     , header
     , json
     , methodNotAllowed
     , notFound
+    , ok
     , setBody
     , setContentType
     , setStatus
@@ -42,8 +42,8 @@ type Header
     = Header Internal.Response.Header
 
 
-default : Response
-default =
+ok : Response
+ok =
     Internal.Response.base
 
 
