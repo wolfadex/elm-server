@@ -1,6 +1,7 @@
 module HelloDBServer exposing (main)
 
 import Database.Postgres exposing (WhereCondition(..))
+import Error
 import File
 import Json.Decode
 import Person
@@ -32,8 +33,8 @@ init _ =
 
 handler : Request -> Response
 handler request =
-    case Server.getPath request of
-        [] ->
+    case ( Server.getMethod request, Server.getPath request ) of
+        ( Get, [] ) ->
             File.load "./examples/hello-db-client.html"
                 |> Server.onSuccess
                     (Json.Decode.decodeValue Json.Decode.string
@@ -47,9 +48,9 @@ handler request =
                             (Json.Decode.errorToString >> Response.error >> Server.respond request)
                         >> Result.Extra.merge
                     )
-                |> Server.onError (Response.error >> Server.respond request)
+                |> Server.onError (Error.toString >> Response.error >> Server.respond request)
 
-        "persons" :: restOfPath ->
+        ( _, "persons" :: restOfPath ) ->
             Person.handler request restOfPath
 
         _ ->

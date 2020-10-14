@@ -162,39 +162,42 @@ new =
 
 handler : Request -> Path -> Response
 handler request path =
-    case path of
-        [] ->
-            case Server.getMethod request of
-                Get ->
-                    get NoCondition
-                        |> Server.onError (Error.toString >> Response.error >> Server.respond request)
-                        |> Server.onSuccess (Response.json >> Server.respond request)
+    case ( Server.getMethod request, path ) of
+        ( Get, [] ) ->
+            get NoCondition
+                |> Server.onError (errorResponseHelper request)
+                |> Server.onSuccess (Response.json >> Server.respond request)
 
-                Post ->
-                    Json.Decode.decodeValue decodePartial (Server.getBody request)
-                        |> Result.mapError (Json.Decode.errorToString >> Response.error >> Server.respond request)
-                        |> Result.map
-                            (create
-                                >> Server.onError (Error.toString >> Response.error >> Server.respond request)
-                                >> Server.onSuccess (Response.json >> Server.respond request)
-                            )
-                        |> Result.Extra.merge
+        ( Post, [] ) ->
+            Json.Decode.decodeValue decodePartial (Server.getBody request)
+                |> Result.mapError (Json.Decode.errorToString >> Response.error >> Server.respond request)
+                |> Result.map
+                    (create
+                        >> Server.onError (errorResponseHelper request)
+                        >> Server.onSuccess (Response.json >> Server.respond request)
+                    )
+                |> Result.Extra.merge
 
-                _ ->
-                    Server.respond request Response.methodNotAllowed
+        ( _, [] ) ->
+            Server.respond request Response.methodNotAllowed
 
-        [ maybeId ] ->
-            case ( Server.getMethod request, String.toInt maybeId ) of
-                ( Delete, Just id ) ->
+        ( Delete, [ maybeId ] ) ->
+            case String.toInt maybeId of
+                Just id ->
                     delete id
-                        |> Server.onError (Error.toString >> Response.error >> Server.respond request)
+                        |> Server.onError (errorResponseHelper request)
                         |> Server.onSuccess (Response.json >> Server.respond request)
 
-                ( _, Just _ ) ->
-                    Server.respond request Response.methodNotAllowed
-
-                ( _, Nothing ) ->
+                Nothing ->
                     Server.respond request (Response.error "Expected a valid id")
+
+        ( _, [ _ ] ) ->
+            Server.respond request Response.methodNotAllowed
 
         _ ->
             Server.respond request Response.notFound
+
+
+errorResponseHelper : Request -> Error.Error -> Response
+errorResponseHelper request =
+    Error.toString >> Response.error >> Server.respond request
