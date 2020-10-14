@@ -32,30 +32,25 @@ init _ =
 
 handler : Request -> Response
 handler request =
-    case Server.matchPath request of
-        Result.Ok path ->
-            case path of
-                [] ->
-                    File.load "./examples/hello-db-client.html"
-                        |> Server.onSuccess
-                            (Json.Decode.decodeValue Json.Decode.string
-                                >> Result.map
-                                    (\file ->
-                                        Response.default
-                                            |> Response.setBody file
-                                            |> Server.respond request
-                                    )
-                                >> Result.mapError
-                                    (Json.Decode.errorToString >> Response.error >> Server.respond request)
-                                >> Result.Extra.merge
+    case Server.getPath request of
+        [] ->
+            File.load "./examples/hello-db-client.html"
+                |> Server.onSuccess
+                    (Json.Decode.decodeValue Json.Decode.string
+                        >> Result.map
+                            (\file ->
+                                Response.ok
+                                    |> Response.setBody file
+                                    |> Server.respond request
                             )
-                        |> Server.onError (Response.error >> Server.respond request)
+                        >> Result.mapError
+                            (Json.Decode.errorToString >> Response.error >> Server.respond request)
+                        >> Result.Extra.merge
+                    )
+                |> Server.onError (Response.error >> Server.respond request)
 
-                "persons" :: restOfPath ->
-                    Person.handler request restOfPath
+        "persons" :: restOfPath ->
+            Person.handler request restOfPath
 
-                _ ->
-                    Server.respond request Response.notFound
-
-        Err err ->
-            Server.respond request (Response.error err)
+        _ ->
+            Server.respond request Response.notFound

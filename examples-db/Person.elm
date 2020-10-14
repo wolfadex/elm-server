@@ -12,6 +12,7 @@ module Person exposing
     )
 
 import Database.Postgres exposing (WhereCondition(..))
+import Error
 import Http exposing (Response)
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
@@ -163,50 +164,37 @@ handler : Request -> Path -> Response
 handler request path =
     case path of
         [] ->
-            Server.getMethod request
-                |> Result.mapError (Response.error >> Server.respond request)
-                |> Result.map
-                    (\method ->
-                        case method of
-                            Get ->
-                                get NoCondition
-                                    |> Server.onError (Response.error >> Server.respond request)
-                                    |> Server.onSuccess (Response.json >> Server.respond request)
+            case Server.getMethod request of
+                Get ->
+                    get NoCondition
+                        |> Server.onError (Error.toString >> Response.error >> Server.respond request)
+                        |> Server.onSuccess (Response.json >> Server.respond request)
 
-                            Post ->
-                                Server.getBody request
-                                    |> Result.andThen
-                                        (Json.Decode.decodeString decodePartial
-                                            >> Result.mapError Json.Decode.errorToString
-                                        )
-                                    |> Result.mapError (Response.error >> Server.respond request)
-                                    |> Result.map
-                                        (create
-                                            >> Server.onError (Response.error >> Server.respond request)
-                                            >> Server.onSuccess (Response.json >> Server.respond request)
-                                        )
-                                    |> Result.Extra.merge
+                Post ->
+                    Json.Decode.decodeValue decodePartial (Server.getBody request)
+                        |> Result.mapError (Json.Decode.errorToString >> Response.error >> Server.respond request)
+                        |> Result.map
+                            (create
+                                >> Server.onError (Error.toString >> Response.error >> Server.respond request)
+                                >> Server.onSuccess (Response.json >> Server.respond request)
+                            )
+                        |> Result.Extra.merge
 
-                            _ ->
-                                Server.respond request Response.methodNotAllowed
-                    )
-                |> Result.Extra.merge
+                _ ->
+                    Server.respond request Response.methodNotAllowed
 
         [ maybeId ] ->
             case ( Server.getMethod request, String.toInt maybeId ) of
-                ( Ok Delete, Just id ) ->
+                ( Delete, Just id ) ->
                     delete id
-                        |> Server.onError (Response.error >> Server.respond request)
+                        |> Server.onError (Error.toString >> Response.error >> Server.respond request)
                         |> Server.onSuccess (Response.json >> Server.respond request)
 
-                ( Ok _, Just _ ) ->
+                ( _, Just _ ) ->
                     Server.respond request Response.methodNotAllowed
 
-                ( Ok _, Nothing ) ->
+                ( _, Nothing ) ->
                     Server.respond request (Response.error "Expected a valid id")
-
-                ( Err err, _ ) ->
-                    Server.respond request (Response.error err)
 
         _ ->
             Server.respond request Response.notFound

@@ -1,5 +1,6 @@
 module HelloFile exposing (main)
 
+import Error
 import File
 import Json.Decode
 import Response
@@ -23,14 +24,14 @@ init _ =
 
 handler : Request -> Response
 handler request =
-    case Server.matchPath request of
-        Result.Ok [] ->
+    case Server.getPath request of
+        [] ->
             File.load "./examples/hello.html"
                 |> Server.onSuccess
                     (Json.Decode.decodeValue Json.Decode.string
                         >> Result.map
                             (\file ->
-                                Response.default
+                                Response.ok
                                     |> Response.setBody file
                                     |> Server.respond request
                             )
@@ -38,10 +39,7 @@ handler request =
                             (Json.Decode.errorToString >> Response.error >> Server.respond request)
                         >> Result.Extra.merge
                     )
-                |> Server.onError (Response.error >> Server.respond request)
+                |> Server.onError (Error.toString >> Response.error >> Server.respond request)
 
-        Result.Ok _ ->
+        _ ->
             Server.respond request Response.notFound
-
-        Err err ->
-            Server.respond request (Response.error err)

@@ -24,12 +24,9 @@ init _ =
 
 handler : Request -> Response
 handler request =
-    case Server.matchPath request of
-        Result.Ok [] ->
-            Server.respond request (Response.default |> Response.setBody "Hello, HTTPS")
+    case Server.getPath request of
+        [] ->
+            Server.respond request (Response.ok |> Response.setBody "Hello, HTTPS")
 
-        Result.Ok _ ->
+        _ ->
             Server.respond request Response.notFound
-
-        Err err ->
-            Server.respond request (Response.error err)
