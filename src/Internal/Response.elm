@@ -26,7 +26,7 @@ base : InternalResponse
 base =
     InternalResponse
         { status = Status.Ok
-        , body = ""
+        , body = "OK"
         , contentType = Text_Html
         , headers = []
         }

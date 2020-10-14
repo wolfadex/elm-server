@@ -1,13 +1,13 @@
-import * as denoHttp from "https://deno.land/std@0.60.0/http/server.ts";
-import * as path from "https://deno.land/std@0.60.0/path/mod.ts";
-import { parse as parseFlags } from "https://deno.land/std@0.60.0/flags/mod.ts";
-import { config } from "https://deno.land/x/dotenv/mod.ts";
-import { Pool } from "https://deno.land/x/postgres@v0.4.0/mod.ts";
-import { validateJwt } from "https://deno.land/x/djwt@v1.2/validate.ts";
+import * as denoHttp from "https://deno.land/std@0.74.0/http/server.ts";
+import * as path from "https://deno.land/std@0.74.0/path/mod.ts";
+import { parse as parseFlags } from "https://deno.land/std@0.74.0/flags/mod.ts";
+import { config } from "https://deno.land/x/dotenv@v0.5.0/mod.ts";
+import { Pool } from "https://deno.land/x/postgres@v0.4.5/mod.ts";
+import { validateJwt } from "https://deno.land/x/djwt@v1.7/validate.ts";
 import {
   makeJwt,
   setExpiration,
-} from "https://deno.land/x/djwt@v1.2/create.ts";
+} from "https://deno.land/x/djwt@v1.7/create.ts";
 
 config({ safe: true });
 
