@@ -2,7 +2,6 @@ module Response exposing
     ( Header
     , Response
     , error
-    , header
     , json
     , methodNotAllowed
     , notFound
@@ -10,10 +9,10 @@ module Response exposing
     , setBody
     , setContentType
     , setStatus
+    , addHeader
     )
 
 import ContentType exposing (ContentType(..))
-import Http exposing (Response)
 import Internal.Response exposing (Header, InternalResponse(..))
 import Json.Encode exposing (Value)
 import Status exposing (Status(..))
@@ -34,12 +33,27 @@ setContentType contentType =
     Internal.Response.map (\r -> { r | contentType = contentType })
 
 
+addHeader : String -> String -> Response -> Response
+addHeader key value =
+    Internal.Response.map
+        (\r ->
+            { r
+                | headers =
+                    Internal.Response.Header
+                        { key = key
+                        , value = value
+                        }
+                        :: r.headers
+            }
+        )
+
+
 type alias Response =
     InternalResponse
 
 
-type Header
-    = Header Internal.Response.Header
+type alias Header
+    = Internal.Response.Header
 
 
 ok : Response
@@ -49,7 +63,7 @@ ok =
 
 header : String -> String -> Header
 header key value =
-    Header { key = key, value = value }
+    Internal.Response.Header { key = key, value = value }
 
 
 json : Value -> Response
