@@ -1,4 +1,4 @@
-module Internal.Response exposing (Header, InternalResponse(..), ResponseData, base, map)
+module Internal.Response exposing (Header(..), InternalResponse(..), ResponseData, base, map)
 
 import ContentType exposing (ContentType(..))
 import Status exposing (Status(..))
@@ -16,7 +16,7 @@ type alias ResponseData =
     }
 
 
-type alias Header =
+type Header = Header
     { key : String
     , value : String
     }
@@ -25,7 +25,7 @@ type alias Header =
 base : InternalResponse
 base =
     InternalResponse
-        { status = Status.Ok
+        { status = StatusOk
         , body = "OK"
         , contentType = Text_Html
         , headers = []

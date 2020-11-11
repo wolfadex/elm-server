@@ -6,7 +6,7 @@ type Status
     | SwitchingProtocols
     | Processing
     | EarlyHints
-    | Ok
+    | StatusOk
     | Created
     | Accepted
     | NonAuthoritativeInformation
@@ -83,7 +83,7 @@ toCode status =
         EarlyHints ->
             103
 
-        Ok ->
+        StatusOk ->
             200
 
         Created ->
@@ -280,7 +280,7 @@ fromCode code =
             EarlyHints
 
         200 ->
-            Ok
+            StatusOk
 
         201 ->
             Created

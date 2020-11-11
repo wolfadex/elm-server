@@ -8,6 +8,7 @@ port module Server exposing
     , Response
     , andThen
     , baseConfig
+    , decodeBody
     , envAtPath
     , getBody
     , getMethod
@@ -16,6 +17,7 @@ port module Server exposing
     , makeSecure
     , map
     , mapError
+    , methodToString
     , onError
     , onSuccess
     , program
@@ -30,7 +32,8 @@ import Error exposing (Error(..))
 import Html.Attributes exposing (value)
 import Internal.Response exposing (InternalResponse(..))
 import Internal.Server exposing (Certs, Config(..), Query, Type(..), runTask)
-import Json.Decode
+import Json.Decode exposing (Decoder)
+import Json.Decode.Extra
 import Json.Encode exposing (Value)
 import Platform
 import Response
@@ -69,6 +72,11 @@ type alias QueryParam =
 getBody : Request -> Value
 getBody (Request { body }) =
     body
+
+
+decodeBody : Decoder a -> Request -> Result Json.Decode.Error a
+decodeBody decoder (Request { body }) =
+    Json.Decode.decodeValue (Json.Decode.Extra.doubleEncoded decoder) body
 
 
 getPath : Request -> Path
@@ -372,6 +380,43 @@ type Method
     | Trace
     | Patch
     | Unofficial String
+
+
+methodToString : Method -> String
+methodToString method =
+    case method of
+        Get ->
+            "Get"
+
+        Post ->
+            "Post"
+
+        Put ->
+            "Put"
+
+        Delete ->
+            "Delete"
+
+        Option ->
+            "Option"
+
+        Head ->
+            "Head"
+
+        Connect ->
+            "Connect"
+
+        Options ->
+            "Options"
+
+        Trace ->
+            "Trace"
+
+        Patch ->
+            "Patch"
+
+        Unofficial m ->
+            m
 
 
 respond : Request -> InternalResponse -> Response

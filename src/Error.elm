@@ -1,4 +1,4 @@
-module Error exposing (Error(..), toString)
+module Error exposing (Error(..), toString, fromString)
 
 import Json.Decode
 
@@ -15,4 +15,9 @@ toString error =
             "Type Error: " ++ Json.Decode.errorToString err
 
         RuntimeError err ->
-            "Runtime Error" ++ err
+            "Runtime Error: " ++ err
+
+
+fromString : String -> Error
+fromString =
+    RuntimeError
