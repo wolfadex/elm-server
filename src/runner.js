@@ -8,6 +8,8 @@ import {
   makeJwt,
   setExpiration,
 } from "https://deno.land/x/djwt@v1.7/create.ts";
+import "https://raw.githubusercontent.com/wolfadex/deno_elm_http/master/http-polyfill.js";
+import * as ElmCompiler from "https://deno.land/x/deno_elm_compiler@0.1.0/compiler.ts";
 
 config({ safe: true });
 
@@ -168,34 +170,20 @@ function showHelp() {
 
 async function compileElm() {
   const sourceFileName = Deno.args[1];
-  const commandLineArgs = Deno.args.slice(2);
   const absolutePath = path.resolve(sourceFileName);
   const extension = path.extname(absolutePath);
 
   if (extension === ".js") {
-    return [absolutePath, commandLineArgs];
+    // Read compiled JS from file
+    const jsData = Deno.readFileSync(jsFileName);
+    const jsText = new TextDecoder("utf-8").decode(jsData);
+    return jsText;
   } else if (extension === ".elm") {
-    const tempDirectory = createTemporaryDirectory();
-    const tempFileName = path.resolve(tempDirectory, "main.js");
-    const elmFileDirectory = path.dirname(absolutePath);
-    const elmProcess = Deno.run({
-      cmd: [
-        "elm",
-        "make",
-        // "--optimize", TODO: Uncomment this
-        "--output=" + tempFileName,
-        absolutePath,
-      ],
-      stdout: "piped",
-      cwd: elmFileDirectory,
-    });
-    const elmResult = await elmProcess.status();
-
-    if (elmResult.success) {
-      return [tempFileName, commandLineArgs];
-    } else {
-      // The Elm compiler will have printed out a compilation error
-      // message, no need to add our own
+    try {
+      const jsText = await ElmCompiler.compileToString(absolutePath);
+      return jsText;
+    } catch (err) {
+      console.log(err);
       exit(1);
     }
   } else {
@@ -206,14 +194,10 @@ async function compileElm() {
   }
 }
 
-async function buildModule(jsFileName, commandLineArgs) {
-  // Read compiled JS from file
-  const jsData = Deno.readFileSync(jsFileName);
-  const jsText = new TextDecoder("utf-8").decode(jsData);
-
+async function buildModule(compiledElm, commandLineArgs) {
   // Run Elm code to create the 'Elm' object
   const globalEval = eval;
-  globalEval(jsText);
+  globalEval(compiledElm);
 
   // Collect flags to pass to Elm program
   const flags = {};
@@ -293,18 +277,14 @@ function findNestedModule(obj) {
   return nestedModules[0];
 }
 
-function runCompiledServer(module, flags) {
-  // Start Elm program
-  elmServer = module.init({ flags });
-}
-
 async function main() {
   switch (Deno.args[0]) {
     case "start":
       {
-        const [compiledElm, commnadLineArgs] = await compileElm();
-        const [module, flags] = await buildModule(compiledElm, commnadLineArgs);
-        runCompiledServer(module, flags);
+        const compiledElm = await compileElm();
+        const commandLineArgs = Deno.args.slice(2);
+        const [module, flags] = await buildModule(compiledElm, commandLineArgs);
+        elmServer = module.init({ flags });
       }
       break;
     case "--help":
@@ -312,7 +292,7 @@ async function main() {
       break;
     default:
       console.log(
-        `Run 'elm-server --help' for a list of commands or visit main.website.com`
+        "Run 'elm-server --help' for a list of commands or visit https://github.com/wolfadex/elm-server"
       );
       exit(1);
       break;
