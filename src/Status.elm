@@ -65,7 +65,7 @@ type Status
     | LoopDetected
     | NotExtended
     | NetworkAuthenticationRequired
-    | Unofficial Int
+    | NonStandard Int String
 
 
 toCode : Status -> Int
@@ -260,12 +260,12 @@ toCode status =
         NetworkAuthenticationRequired ->
             511
 
-        Unofficial code ->
+        NonStandard code _ ->
             code
 
 
-fromCode : Int -> Status
-fromCode code =
+fromCode : (Int -> String) Int -> Status
+fromCode nonStandardCodeText code =
     case code of
         100 ->
             Continue
@@ -456,5 +456,5 @@ fromCode code =
         511 ->
             NetworkAuthenticationRequired
 
-        unofficialCode ->
-            Unofficial unofficialCode
+        nonStandardCode ->
+            NonStandard nonStandardCode (nonStandardCodeText nonStandardCode)

@@ -4,6 +4,7 @@ module ContentType exposing (ContentType(..), fromString, toString)
 type ContentType
     = Text_Html
     | Application_Json
+    | Other String
 
 
 toString : ContentType -> String
@@ -15,15 +16,18 @@ toString type_ =
         Application_Json ->
             "application/json"
 
+        Other str ->
+            str
 
-fromString : String -> Maybe ContentType
-fromString maybeType =
-    case maybeType of
+
+fromString : String -> ContentType
+fromString type_ =
+    case type_ of
         "text/html" ->
-            Just Text_Html
+            Text_Html
 
         "application/json" ->
-            Just Application_Json
+            Application_Json
 
         _ ->
-            Nothing
+            Other type_

@@ -1,20 +1,63 @@
-import * as denoHttp from "https://deno.land/std@0.60.0/http/server.ts";
-import * as path from "https://deno.land/std@0.60.0/path/mod.ts";
-import { parse as parseFlags } from "https://deno.land/std@0.60.0/flags/mod.ts";
-import { config } from "https://deno.land/x/dotenv/mod.ts";
-import { Pool } from "https://deno.land/x/postgres@v0.4.0/mod.ts";
-import { validateJwt } from "https://deno.land/x/djwt@v1.2/validate.ts";
-import {
-  makeJwt,
-  setExpiration,
-} from "https://deno.land/x/djwt@v1.2/create.ts";
+// import * as denoHttp from "https://deno.land/std@0.60.0/http/server.ts";
+import * as path from "https://deno.land/std@0.109.0/path/mod.ts";
+// import { parse as parseFlags } from "https://deno.land/std@0.60.0/flags/mod.ts";
+// import { config } from "https://deno.land/x/dotenv/mod.ts";
+// import { Pool } from "https://deno.land/x/postgres@v0.4.0/mod.ts";
+// import { validateJwt } from "https://deno.land/x/djwt@v1.2/validate.ts";
+// import {
+//   makeJwt,
+//   setExpiration,
+// } from "https://deno.land/x/djwt@v1.2/create.ts";
+import { readLines, writeAll } from "https://deno.land/std@0.109.0/io/mod.ts";
 
-config({ safe: true });
+// config({ safe: true });
 
 const tempDirectoriesToRemove = [];
 let elmServer = null;
 let serverInstance = null;
 let databaseConnectionPool = null;
+
+Object.defineProperty(Object.prototype, "__elm_interop", {
+  set([jsFn, ...args]) {
+    try {
+      this.__elm_interop_result = {
+        tag: "Ok",
+        result: syncElmInterop(jsFn, args),
+      };
+    } catch (err) {
+      this.__elm_interop_result = { tag: "Error", error: err };
+    }
+  },
+  get() {
+    return this.__elm_interop_result;
+  },
+});
+
+function syncElmInterop(jsFn, args) {
+  switch (jsFn) {
+    case "withRequest":
+      return withRequestSync(args[0], args[1], args.slice(2));
+  }
+}
+
+function withRequestSync(requestEvent, requestFn, args) {
+  switch (requestFn) {
+    case "getUrl":
+      return requestEvent.request.url;
+
+    // case "getBody":
+    //   // const data = await readableStreamFromReader(requestEvent.request.body);
+    //   //
+    //   for await (const data of requestEvent.request.body) {
+    //     respondOk(continuationKey, true, new TextDecoder("utf-8").decode(data));
+    //   }
+    //   break;
+
+    default:
+      throw new Error("Unknown sync request function " + requestFn);
+  }
+}
+
 const _setTimeout = globalThis.setTimeout;
 const __elm_interop_tasks = new Map();
 let __elm_interop_nextTask = null;
@@ -36,128 +79,115 @@ globalThis.setTimeout = (callback, time, ...args) => {
   if (time === -69108109 && __elm_interop_nextTask != null) {
     const [token, msg, args] = __elm_interop_nextTask;
     __elm_interop_nextTask = null;
-
     Promise.resolve()
       .then(async (_) => {
         switch (msg) {
-          case "SERVE":
-            {
-              const { databaseConnection, port, certs } = args;
-              const options = { port };
+          // std io
+          case "stdout":
+            await writeAll(Deno.stdout, new TextEncoder().encode(args));
+            return null;
 
-              if (certs != null) {
-                serverInstance = denoHttp.serveTLS({
-                  ...options,
-                  certFile: certs.certificatePath,
-                  keyFile: certs.keyPath,
-                });
-              } else {
-                serverInstance = denoHttp.serve(options);
-              }
-
-              if (databaseConnection != null) {
-                const POOL_CONNECTIONS = 20;
-                const {
-                  hostname,
-                  port,
-                  user,
-                  password,
-                  database,
-                } = databaseConnection;
-                databaseConnectionPool = new Pool(
-                  {
-                    user,
-                    password,
-                    port,
-                    hostname,
-                    database,
-                  },
-                  POOL_CONNECTIONS
-                );
-              }
-
-              console.log("Server running on port:", port);
-
-              for await (const req of serverInstance) {
-                if (elmServer == null) {
-                  console.error(
-                    "Somehow started the server but lost the elm app runtime."
-                  );
-                  exit(1);
-                } else {
-                  const decoder = new TextDecoder();
-                  const decodedBody = decoder.decode(
-                    await Deno.readAll(req.body)
-                  );
-                  req.elmBody = decodedBody;
-                  elmServer.ports.requestPort.send(req);
-                }
-              }
-
-              console.log("Server shutdown");
+          case "stdin":
+            const inputBytes = await readLines(Deno.stdin);
+            for await (const input of inputBytes) {
+              return input;
             }
             break;
-          case "RESPOND":
-            {
-              const { headers, ...restOptions } = args.options;
-              const actualHeaders = new Headers();
 
-              headers.forEach(function ([key, val]) {
-                actualHeaders.set(key, val);
-              });
-              args.request.respond({
-                ...restOptions,
-                headers: actualHeaders,
-              });
-            }
-            break;
-          case "CLOSE":
-            serverInstance.close();
-            break;
-          case "PRINT":
-            console.log(args);
-            break;
-          case "DATABASE_QUERY": {
-            const client = await databaseConnectionPool.connect();
-            const result = await client.query(args);
+          // server/connections
+          case "listen":
+            const listener = await Deno.listen(args);
+            return listener;
 
-            client.release();
+          case "acceptConnection":
+            const httpConnection = Deno.serveHttp(await args.accept());
+            return httpConnection;
 
-            return result.rows;
-          }
-          case "FILE_SYSTEM_READ": {
-            const decoder = new TextDecoder("utf-8");
-            const fileContent = decoder.decode(await Deno.readFile(args));
+          case "serveHttp":
+            const requestEvent = await args.nextRequest();
+            return requestEvent;
 
-            return fileContent;
-          }
-          case "JWT_GENERATE":
-            return makeJwt({
-              ...args,
-              payload: {
-                ...args.payload,
-                exp: setExpiration(args.payload.exp),
-              },
-            });
-          case "JWT_VALIDATE":
-            return validateJwt(args);
-          default:
-            console.error(`Error: Unknown server request: "${msg}"`, args);
+          case "withRequest":
+            return withRequestAsync(args.request, args.action, args.body);
+
+          // files
+          case "readFile":
+            return new TextDecoder().decode(await Deno.readFile(args));
+          //     case "CLOSE":
+          //       serverInstance.close();
+          //       break;
+          //     case "DATABASE_QUERY": {
+          //       const client = await databaseConnectionPool.connect();
+          //       const result = await client.query(args);
+
+          //       client.release();
+
+          //       return result.rows;
+          //     }
+          //     case "FILE_SYSTEM_READ": {
+          //       const decoder = new TextDecoder("utf-8");
+          //       const fileContent = decoder.decode(await Deno.readFile(args));
+
+          //       return fileContent;
+          //     }
+          //     case "JWT_GENERATE":
+          //       return makeJwt({
+          //         ...args,
+          //         payload: {
+          //           ...args.payload,
+          //           exp: setExpiration(args.payload.exp),
+          //         },
+          //       });
+          //     case "JWT_VALIDATE":
+          //       return validateJwt(args);
+          //     default:
+          //       console.error(`Error: Unknown server request: "${msg}"`, args);
         }
       })
       .then((result) => {
         __elm_interop_tasks.set(token, { tag: "Ok", result });
       })
       .catch((err) => {
+        console.log("async err", err);
         __elm_interop_tasks.set(token, { tag: "Error", error: err });
       })
       .then((_) => {
         callback();
       });
+  } else if (__elm_interop_nextTask != null) {
+    console.log("TODO: how did we get here?", __elm_interop_nextTask);
   } else {
     return _setTimeout(callback, time, ...args);
   }
 };
+
+async function withRequestAsync(requestEvent, requestFn, args) {
+  switch (requestFn) {
+    case "respond":
+      await requestEvent.respondWith(
+        new Response(
+          args
+          // {
+          //   status: args[0].options.status,
+          //   statusText: args[0].options.statusText,
+          //   headers: headersFromArray(args[0].options.headers),
+          // }
+        )
+      );
+      return null;
+
+    // case "getBody":
+    //   // const data = await readableStreamFromReader(requestEvent.request.body);
+    //   //
+    //   for await (const data of requestEvent.request.body) {
+    //     respondOk(continuationKey, true, new TextDecoder("utf-8").decode(data));
+    //   }
+    //   break;
+
+    default:
+      throw new Error("Unknown async request function " + requestFn);
+  }
+}
 
 function showHelp() {
   console.log(`elm-server commands and options
@@ -217,7 +247,8 @@ async function buildModule(jsFileName, commandLineArgs) {
 
   // Collect flags to pass to Elm program
   const flags = {};
-  flags["arguments"] = parseFlags(commandLineArgs);
+  // flags["arguments"] = parseFlags(commandLineArgs);
+  flags["arguments"] = commandLineArgs;
   switch (Deno.build.os) {
     case "mac":
     case "darwin":
@@ -296,6 +327,7 @@ function findNestedModule(obj) {
 function runCompiledServer(module, flags) {
   // Start Elm program
   elmServer = module.init({ flags });
+  elmServer.ports.finished.subscribe(exit);
 }
 
 async function main() {

@@ -1,79 +1,33 @@
-module Internal.Server exposing
-    ( Certs
-    , Config(..)
-    , ConfigData
-    , Query(..)
-    , Type(..)
-    , query
-    , runTask
-    )
+module Internal.IO exposing (..)
 
+
+import Dict exposing (Dict)
 import Error exposing (Error(..))
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
 import Process
+import Set exposing (Set)
 import Task exposing (Task)
 
 
-type Config
-    = Config ConfigData
+type alias IO a =
+    Task Error ( ProcessChanges, a )
 
 
-type alias ConfigData =
-    { port_ : Int
-    , type_ : Type
-    , databaseConnection : Maybe DatabaseConnection
-    , envPath : List String
-    }
+type alias ProcessChanges =
+    ( Dict String Process.Id, Set String )
 
 
-type alias DatabaseConnection =
-    { hostname : String
-    , port_ : Int
-    , user : String
-    , password : String
-    , database : String
-    }
+evalSync : String -> List Value -> Decoder a -> Result Error a
+evalSync jsFn args responseDecoder =
+    Json.Encode.object [ ( "__elm_interop", Json.Encode.list identity (Json.Encode.string jsFn :: args) ) ]
+        |> Json.Decode.decodeValue (Json.Decode.field "__elm_interop" (decodeEvalResult responseDecoder))
+        |> Result.mapError TypeError
+        |> Result.andThen identity
 
 
-type Type
-    = Basic
-    | Secure Certs
-
-
-type alias Certs =
-    { certificatePath : String
-    , keyPath : String
-    }
-
-
-runTask : String -> Value -> Task Error Value
-runTask message args =
-    evalAsync message args Json.Decode.value
-
-
-type Query
-    = Query String
-
-
-query : Query -> Task Error Value
-query (Query qry) =
-    qry
-        |> Json.Encode.string
-        |> runTask "DATABASE_QUERY"
-
-
-
--- eval : List Value -> Code -> Decoder a -> Result Error a
--- eval params code decoder =
---     Json.Encode.object [ ( "__elm_interop", Json.Encode.list identity (Json.Encode.string code :: params) ) ]
---         |> Json.Decode.decodeValue (Json.Decode.field "__elm_interop" (decodeEvalResult decoder))
---         |> Result.mapError TypeError
---         |> Result.andThen identity
-
-
-evalAsync : String -> Value -> Decoder a -> Task Error a
-evalAsync message args decoder =
+evalAsync : String -> Value -> Decoder a -> IO a
+evalAsync jsFn args responseDecoder =
     let
         token =
             Json.Encode.object []
@@ -83,7 +37,11 @@ evalAsync message args decoder =
             (\_ ->
                 let
                     _ =
-                        Json.Encode.object [ ( "__elm_interop_async", Json.Encode.list identity [ token, Json.Encode.string message, args ] ) ]
+                        Json.Encode.object
+                            [ ( "__elm_interop_async"
+                              , Json.Encode.list identity [ token, Json.Encode.string jsFn, args ]
+                              )
+                            ]
                 in
                 -- 69 108 109 == Elm
                 Process.sleep -69108109
@@ -92,12 +50,12 @@ evalAsync message args decoder =
             (\_ ->
                 case
                     Json.Encode.object [ ( "token", token ) ]
-                        |> Json.Decode.decodeValue (Json.Decode.field "__elm_interop_async" (decodeEvalResult decoder))
+                        |> Json.Decode.decodeValue (Json.Decode.field "__elm_interop_async" (decodeEvalResult responseDecoder))
                         |> Result.mapError TypeError
                         |> Result.andThen identity
                 of
                     Ok result ->
-                        Task.succeed result
+                        Task.succeed ( noProcesses, result )
 
                     Err error ->
                         Task.fail error
@@ -139,3 +97,26 @@ decodeEvalResult decodeResult =
 decodeRuntimeError : Decoder Error
 decodeRuntimeError =
     Json.Decode.field "message" Json.Decode.string |> Json.Decode.map RuntimeError
+
+
+andThen : (a -> IO b) -> IO a -> IO b
+andThen fn =
+    Task.andThen
+        (\( processesA, a ) ->
+            Task.map
+                (Tuple.mapFirst (mergeProcessChanges processesA))
+                (fn a)
+        )
+
+
+---- HELPERS
+
+
+noProcesses : ProcessChanges
+noProcesses =
+    ( Dict.empty, Set.empty )
+
+
+mergeProcessChanges : ProcessChanges -> ProcessChanges -> ProcessChanges
+mergeProcessChanges ( newProcessesA, toRemoveA ) ( newProcessesB, toRemoveB ) =
+    ( Dict.union newProcessesA newProcessesB, Set.union toRemoveA toRemoveB )

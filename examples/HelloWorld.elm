@@ -1,67 +1,42 @@
 module HelloWorld exposing (main)
 
-import Error
-import Html.String as Html
-import Html.String.Attributes as Attr
-import Logger as Log
-import Response
-import Server exposing (Config, Flags, Request, Response)
+import IO exposing (IO)
+import IO.Http exposing (Request)
+import IO.File
 
 
-main : Server.Program
+main : IO.Program
 main =
-    Server.program
-        { init = init
-        , handler = handler
-        }
+    IO.program
+        -- (IO.pure 2222
+        --     |> IO.andThen (\port_ -> IO.Http.listen port_ |> IO.map (Tuple.pair port_))
+        --     |> IO.andThen
+        --         (\( port_, listener ) ->
+        --             IO.Http.acceptConnection listener
+        --                 (\connection ->
+        --                     IO.Http.serve connection handleRequest
+        --                         |> IO.andThen (\connectionPid -> IO.printLine "connecting")
+        --                 )
+        --                 |> IO.map (Tuple.pair port_)
+        --         )
+        --     |> IO.andThen (\( port_, listenerPid ) -> IO.printLine ("Server listening on port " ++ String.fromInt port_))
+        -- )
+        (IO.File.readFile "elm.json"
+            |> IO.andThen IO.printLine
+        )
 
 
-init : Flags -> Config
-init _ =
-    Server.baseConfig
+handleRequest : Request -> IO ()
+handleRequest request =
+    case IO.Http.getUrl request of
+        Ok url ->
+            case String.replace "http://localhost:2222/" "" url |> String.toFloat of
+                Nothing ->
+                    IO.Http.respondWith ("Hello " ++ url) request
 
-
-handler : Request -> Response
-handler request =
-    case Server.matchPath request of
-        Ok [] ->
-            Server.respond request (Response.default |> Response.setBody indexPage)
-                |> Server.andThen (\_ -> Log.toConsole "index page requested")
-
-        Ok [ "hello", name ] ->
-            Log.toConsole ("Saying hello to " ++ name)
-                |> Server.andThen
-                    (\_ ->
-                        Response.default
-                            |> Response.setBody ("Hello, " ++ name ++ "!")
-                            |> Server.respond request
-                    )
-
-        Ok _ ->
-            Server.respond request Response.notFound
+                Just sleepSeconds ->
+                    IO.sleep (sleepSeconds * 1000)
+                        |> IO.thenDo (IO.Http.respondWith ("Responding after " ++ String.fromFloat sleepSeconds ++ " seconds") request)
 
         Err err ->
-            Server.respond request (Response.error (Error.toString err))
-
-
-indexPage : String
-indexPage =
-    Html.div
-        []
-        [ Html.h1 [] [ Html.text "Howdy, Partner" ]
-        , Html.nav
-            []
-            [ Html.a
-                [ Attr.href "" ]
-                [ Html.text "Home" ]
-            , Html.a
-                [ Attr.href "hello/carl" ]
-                [ Html.text "Say Hello" ]
-            ]
-        ]
-        |> Html.toString 2
-        |> (++) "<!DOCTYPE html><html><head><title>Fun With Elm</title></head><body>"
-        |> (\html ->
-                html
-                    ++ "</body></html>"
-           )
+            IO.fail "Error getting url"
