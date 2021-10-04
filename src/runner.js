@@ -112,6 +112,19 @@ globalThis.setTimeout = (callback, time, ...args) => {
           // files
           case "readFile":
             return new TextDecoder().decode(await Deno.readFile(args));
+
+          case "requestPermissions":
+            for (const permission of args) {
+              await Deno.permissions.request(permission);
+            }
+            return null;
+
+          case "revokePermissions":
+            for (const permission of args) {
+              await Deno.permissions.revoke(permission);
+            }
+            return null;
+
           //     case "CLOSE":
           //       serverInstance.close();
           //       break;
@@ -148,6 +161,7 @@ globalThis.setTimeout = (callback, time, ...args) => {
       })
       .catch((err) => {
         console.log("async err", err);
+        console.log("\n\n------\n\n", msg, args);
         __elm_interop_tasks.set(token, { tag: "Error", error: err });
       })
       .then((_) => {
@@ -264,8 +278,6 @@ async function buildModule(jsFileName, commandLineArgs) {
       console.log("Unrecognized OS '" + Deno.build.os + "'");
       exit(1);
   }
-  flags["environment"] = Deno.env.toObject();
-  // flags["workingDirectory"] = Deno.cwd();
 
   // Get Elm program object
   var module = findNestedModule(globalThis["Elm"]);
@@ -333,8 +345,14 @@ async function main() {
   switch (Deno.args[0]) {
     case "start":
       {
-        const [compiledElm, commnadLineArgs] = await compileElm();
-        const [module, flags] = await buildModule(compiledElm, commnadLineArgs);
+        await Deno.permissions.request({ name: "read" });
+        await Deno.permissions.request({ name: "write" });
+        await Deno.permissions.request({ name: "run" });
+        const [compiledElm, commandLineArgs] = await compileElm();
+        const [module, flags] = await buildModule(compiledElm, commandLineArgs);
+        await Deno.permissions.revoke({ name: "read" });
+        await Deno.permissions.revoke({ name: "write" });
+        await Deno.permissions.revoke({ name: "run" });
         runCompiledServer(module, flags);
       }
       break;

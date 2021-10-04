@@ -11,7 +11,7 @@ import Task exposing (Task)
 
 
 type alias IO a =
-    Task Error ( ProcessChanges, a )
+    (Task Error ( ProcessChanges, a ))
 
 
 type alias ProcessChanges =
@@ -105,11 +105,56 @@ andThen fn =
         (\( processesA, a ) ->
             Task.map
                 (Tuple.mapFirst (mergeProcessChanges processesA))
-                (fn a)
+                 (fn a)
         )
 
 
+map : (a -> b) -> IO a -> IO b
+map fn =
+    Task.map (Tuple.mapSecond fn)
+
+
+pure : a -> IO a
+pure a =
+    Task.succeed ( noProcesses, a )
+
+
+fail : String -> IO a
+fail =
+    RuntimeError >> Task.fail
+
+
+recover : (Error -> IO a) -> IO a -> IO a
+recover =
+    Task.onError
+
+
+sleep : Float -> IO ()
+sleep =
+    Process.sleep
+        >> Task.map (Tuple.pair noProcesses)
+
+
 ---- HELPERS
+
+
+loop : String -> IO a -> IO Process.Id
+loop id toLoop =
+    Process.spawn toLoop
+        |> savePid id
+        |> andThen (\_ -> Process.spawn toLoop |> savePid id)
+
+
+savePid : String -> Task Error Process.Id -> IO Process.Id
+savePid key =
+    Task.map
+        (\pid ->
+            ( ( Dict.singleton key pid
+                , Set.empty
+                )
+            , pid
+            )
+        )
 
 
 noProcesses : ProcessChanges

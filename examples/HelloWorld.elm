@@ -1,6 +1,6 @@
 module HelloWorld exposing (main)
 
-import IO exposing (IO)
+import IO exposing (IO, Permission(..), PermissionSpecificity(..))
 import IO.Http exposing (Request)
 import IO.File
 
@@ -8,21 +8,20 @@ import IO.File
 main : IO.Program
 main =
     IO.program
-        -- (IO.pure 2222
-        --     |> IO.andThen (\port_ -> IO.Http.listen port_ |> IO.map (Tuple.pair port_))
-        --     |> IO.andThen
-        --         (\( port_, listener ) ->
-        --             IO.Http.acceptConnection listener
-        --                 (\connection ->
-        --                     IO.Http.serve connection handleRequest
-        --                         |> IO.andThen (\connectionPid -> IO.printLine "connecting")
-        --                 )
-        --                 |> IO.map (Tuple.pair port_)
-        --         )
-        --     |> IO.andThen (\( port_, listenerPid ) -> IO.printLine ("Server listening on port " ++ String.fromInt port_))
-        -- )
-        (IO.File.readFile "elm.json"
-            |> IO.andThen IO.printLine
+        -- [ NetPermission Any ]
+        []
+        (IO.pure 2222
+            |> IO.andThen (\port_ -> IO.Http.listen port_ |> IO.map (Tuple.pair port_))
+            |> IO.andThen
+                (\( port_, listener ) ->
+                    IO.Http.acceptConnection listener
+                        (\connection ->
+                            IO.Http.serve connection handleRequest
+                                |> IO.andThen (\connectionPid -> IO.printLine "connecting")
+                        )
+                        |> IO.map (Tuple.pair port_)
+                )
+            |> IO.andThen (\( port_, listenerPid ) -> IO.printLine ("Server listening on port " ++ String.fromInt port_))
         )
 
 

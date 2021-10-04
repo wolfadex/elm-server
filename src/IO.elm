@@ -3,13 +3,13 @@ port module IO exposing ( ..)
 
 import Dict exposing (Dict)
 import Error exposing (Error(..))
+import Internal.IO exposing (ProcessChanges)
 import Json.Decode exposing (Decoder)
 import Json.Encode exposing (Value)
 import Platform
 import Set exposing (Set)
 import Task exposing (Task)
 import Process
-import Internal.IO exposing (ProcessChanges)
 
 
 ---- EXTERNAL
@@ -25,15 +25,42 @@ type alias IO a =
     Internal.IO.IO a
 
 
+type PermissionSpecificity
+    = Any
+    | Only String
+
+
+type Permission
+    = RunPermission PermissionSpecificity -- url
+    | ReadPermission PermissionSpecificity -- path
+    | WritePermission PermissionSpecificity -- path
+    | NetPermission PermissionSpecificity -- host
+    | EnvPermission PermissionSpecificity -- variable
+    | FfiPermission
+    | HrtimePermission
+
+
+enableAllPermissions : List Permission
+enableAllPermissions =
+    [ RunPermission Any
+    , ReadPermission Any -- path
+    , WritePermission Any -- path
+    , NetPermission Any -- host
+    , EnvPermission Any -- variable
+    , FfiPermission
+    , HrtimePermission
+    ]
+
+
 -- CORE IO
 
 
-program : IO () -> Program
-program io =
+program :List Permission -> IO () -> Program
+program permissions io =
     Platform.worker
         { init = \_ ->
             ( Dict.empty
-            , Task.attempt Next io
+            , Task.attempt Next (requestPermissions permissions |> andThen (\_ -> io))
             )
         , update = update
         , subscriptions = \_ -> jsEvent JsEvent
@@ -76,24 +103,24 @@ thenDo ioB =
 
 
 map : (a -> b) -> IO a -> IO b
-map fn =
-    Task.map (Tuple.mapSecond fn)
+map =
+    Internal.IO.map
             
 
 
--- recover : (Error -> IO a) -> IO a -> IO a
--- recover =
---     Task.onError
+recover : (Error -> IO a) -> IO a -> IO a
+recover =
+    Internal.IO.recover
 
 
 pure : a -> IO a
-pure a =
-    Task.succeed ( Internal.IO.noProcesses, a )
+pure =
+    Internal.IO.pure
 
 
 fail : String -> IO a
 fail =
-    RuntimeError >> Task.fail
+    Internal.IO.fail
 
 
 -- sequence : List (IO a) -> IO b -> IO (List a)
@@ -103,16 +130,70 @@ fail =
 
 sleep : Float -> IO ()
 sleep =
-    Process.sleep
-        >> Task.map (Tuple.pair Internal.IO.noProcesses)
+    Internal.IO.sleep
 
 
--- HTTP
+-- PERMISSIONS
+
+
+requestPermissions : List Permission -> IO ()
+requestPermissions permissions =
+    Internal.IO.evalAsync "requestPermissions"
+        (Json.Encode.list encodePermission permissions)
+        (Json.Decode.succeed ())
+
+
+revokePermissions : List Permission -> IO ()
+revokePermissions permissions =
+    Internal.IO.evalAsync "revokePermissions"
+        (Json.Encode.list encodePermission permissions)
+        (Json.Decode.succeed ())
 
 
 
 
 ---- IMPLEMENTATION
+
+
+encodePermission : Permission -> Value
+encodePermission permission =
+    Json.Encode.object <|
+        case permission of
+            RunPermission specificity ->
+                ( "name", Json.Encode.string "run" )
+                    :: case specificity of
+                        Any -> []
+                        Only command -> [ ( "command", Json.Encode.string command ) ]
+
+            ReadPermission specificity ->
+                ( "name", Json.Encode.string "read" )
+                    :: case specificity of
+                        Any -> []
+                        Only path -> [ ( "path", Json.Encode.string path ) ]
+
+            WritePermission specificity ->
+                ( "name", Json.Encode.string "write" )
+                    :: case specificity of
+                        Any -> []
+                        Only path -> [ ( "path", Json.Encode.string path ) ]
+
+            NetPermission specificity ->
+                ( "name", Json.Encode.string "net" )
+                    :: case specificity of
+                        Any -> []
+                        Only host -> [ ( "host", Json.Encode.string host ) ]
+
+            EnvPermission specificity ->
+                ( "name", Json.Encode.string "env" )
+                    :: case specificity of
+                        Any -> []
+                        Only variable -> [ ( "variable", Json.Encode.string variable ) ]
+
+            FfiPermission ->
+                [ ( "name", Json.Encode.string "ffi" ) ]
+
+            HrtimePermission ->
+                [ ( "name", Json.Encode.string "hrtime" ) ]
 
 
 initialState : ( ProcessChanges, () )
@@ -125,8 +206,7 @@ type alias Model =
 
 
 type alias Flags =
-    { environment : Value
-    , arguments : List String
+    { arguments : List String
     }
 
 

@@ -26,49 +26,49 @@ type Connection = Connection Value
 
 acceptConnection : Listener -> (Connection -> IO ()) -> IO Process.Id
 acceptConnection (Listener listener) connectionHandler =
-    Process.spawn
-        (getNextConnection listener connectionHandler)
-        |> savePid "connection__???"
-
-
-getNextConnection : Value -> (Connection -> IO ()) -> IO Process.Id
-getNextConnection listener connectionHandler =
-    Internal.IO.evalAsync "acceptConnection" 
-        listener
-        (Json.Decode.map Connection Json.Decode.value)
-        |> Internal.IO.andThen connectionHandler
-        |> Internal.IO.andThen (\_ -> Process.spawn (getNextConnection listener connectionHandler) |> savePid "connection__???")
-
-
-savePid : String -> Task Error Process.Id -> IO Process.Id
-savePid key =
-    Task.map
-        (\pid ->
-            ( ( Dict.singleton key pid
-                , Set.empty
-                )
-            , pid
-            )
+    -- Process.spawn
+    --     (getNextConnection listener connectionHandler)
+    --     |> Internal.IO.savePid "connection__???"
+    Internal.IO.loop "connection__???"
+        (Internal.IO.evalAsync "acceptConnection" 
+            listener
+            (Json.Decode.map Connection Json.Decode.value)
+            |> Internal.IO.andThen connectionHandler
         )
+
+
+-- getNextConnection : Value -> (Connection -> IO ()) -> IO Process.Id
+-- getNextConnection listener connectionHandler =
+--     Internal.IO.evalAsync "acceptConnection" 
+--         listener
+--         (Json.Decode.map Connection Json.Decode.value)
+--         |> Internal.IO.andThen connectionHandler
+--         |> Internal.IO.andThen (\_ -> Process.spawn (getNextConnection listener connectionHandler) |> Internal.IO.savePid "connection__???")
 
 
 type Request = Request Value
 
 
-serve : Connection -> (Request -> IO ()) -> IO ()
+serve : Connection -> (Request -> IO ()) -> IO Process.Id
 serve (Connection connection) requestHandler =
-    Process.spawn
-        (getNextRequest connection requestHandler)
-        |> Task.map (\_ -> ( Internal.IO.noProcesses, () ))
+    -- Process.spawn
+    --     (getNextRequest connection requestHandler)
+    --     |> Task.map (\_ -> ( Internal.IO.noProcesses, () ))
+    Internal.IO.loop "serve__???"
+        (Internal.IO.evalAsync "serveHttp"
+            connection
+            (Json.Decode.map Request Json.Decode.value)
+            |> Internal.IO.andThen requestHandler
+        )
 
 
-getNextRequest : Value -> (Request -> IO ()) -> IO ()
-getNextRequest connection requestHandler =
-    Internal.IO.evalAsync "serveHttp"
-        connection
-        (Json.Decode.map Request Json.Decode.value)
-        |> Internal.IO.andThen requestHandler
-        |> Internal.IO.andThen (\_ -> Process.spawn (getNextRequest connection requestHandler) |> Task.map (\_ -> ( Internal.IO.noProcesses, () )))
+-- getNextRequest : Value -> (Request -> IO ()) -> IO ()
+-- getNextRequest connection requestHandler =
+--     Internal.IO.evalAsync "serveHttp"
+--         connection
+--         (Json.Decode.map Request Json.Decode.value)
+--         |> Internal.IO.andThen requestHandler
+--         |> Internal.IO.andThen (\_ -> Process.spawn (getNextRequest connection requestHandler) |> Task.map (\_ -> ( Internal.IO.noProcesses, () )))
 
 
 getUrl : Request -> Result Error String
